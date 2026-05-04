@@ -38,6 +38,8 @@
 #   /tmp/crypto_scan_v5/run.log
 
 set -uo pipefail
+export LC_ALL=C
+export LANG=C
 
 SHOW_ALL_JPG=0
 AUTO_EJECT_OVERRIDE=""
@@ -534,14 +536,14 @@ scan_partition() {
     LC_ALL=C grep -iE "$RE_ALL" "$RAW_TMP" | sort -u > "$ALL_HITS" || true
 
     LC_ALL=C grep -iE "$RE_HIGH" "$ALL_HITS" \
-      | awk '{$1=""; sub(/^ /,""); print}' \
+      | LC_ALL=C awk '{$1=""; sub(/^ /,""); print}' \
       | sort -u > "$HIGH_TXT" || true
 
     LC_ALL=C grep -iE "$RE_LOW" "$ALL_HITS" \
-      | awk '{$1=""; sub(/^ /,""); print}' \
+      | LC_ALL=C awk '{$1=""; sub(/^ /,""); print}' \
       | sort -u > "$LOW_TXT" || true
 
-    awk '{$1=""; sub(/^ /,""); print}' "$RAW_TMP" \
+    LC_ALL=C awk '{$1=""; sub(/^ /,""); print}' "$RAW_TMP" \
       | bip39_stream_scan "$VALID_BIP" "$CAND_BIP"
 
     rm -f "$RAW_TMP"
