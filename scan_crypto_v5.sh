@@ -1,0 +1,682 @@
+#!/bin/zsh
+# MIT License
+#
+# Copyright (c) 2026 DaveMathews.com
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+# scan_crypto_v5.sh
+# Read-only crypto forensic triage for USB drives and SD cards.
+# No disk image copy.
+# Single-file script.
+#
+# Run:
+#   sudo zsh scan_crypto_v5.sh
+#
+# Optional helpers:
+#   brew install pv foremost
+#   python3 -m pip install mnemonic
+#
+# Output:
+#   /tmp/crypto_scan_v5/summary.txt
+#   /tmp/crypto_scan_v5/results.csv
+#   /tmp/crypto_scan_v5/run.log
+
+set -uo pipefail
+
+SHOW_ALL_JPG=0
+AUTO_EJECT_OVERRIDE=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --all-jpg)
+      SHOW_ALL_JPG=1
+      shift
+      ;;
+    --no-auto-eject)
+      AUTO_EJECT_OVERRIDE=0
+      shift
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      echo "Usage: sudo zsh $0 [--all-jpg] [--no-auto-eject]" >&2
+      exit 1
+      ;;
+  esac
+done
+
+if [[ $EUID -ne 0 ]]; then
+  echo "Must run as root: sudo zsh $0" >&2
+  exit 1
+fi
+
+OUTDIR=/tmp/crypto_scan_v5
+mkdir -p "$OUTDIR"
+
+SUMMARY="$OUTDIR/summary.txt"
+CSV="$OUTDIR/results.csv"
+LOG="$OUTDIR/run.log"
+
+: > "$SUMMARY"
+: > "$LOG"
+
+echo "parent,partition,raw_high,raw_low,bip39_valid,bip39_candidate,fs_hits,ext_hits,action" > "$CSV"
+
+printf "Scan started: %s\n" "$(date)" | tee -a "$SUMMARY"
+printf "Output directory: %s\n\n" "$OUTDIR" | tee -a "$SUMMARY"
+printf "Searching for: wallet files, crypto address/key patterns, BIP39 seed phrases, and interesting filenames (including JPG/JPEG).\n\n" | tee -a "$SUMMARY"
+
+BS=16m
+MIN_STR=6
+
+AUTO_EJECT_NO_HITS=0
+RUN_FOREMOST_ON_STRONG_HITS=1
+RUN_FS_SCAN=1
+RUN_EXT_SCAN=1
+[[ -n "$AUTO_EJECT_OVERRIDE" ]] && AUTO_EJECT_NO_HITS="$AUTO_EJECT_OVERRIDE"
+
+PAT_HIGH=(
+  'bc1[a-zA-HJ-NP-Z0-9]{25,90}'
+  '[13][a-km-zA-HJ-NP-Z1-9]{25,34}'
+  '0x[0-9a-fA-F]{40}'
+  '4[1-9A-HJ-NP-Za-km-z]{94}'
+  'T[1-9A-HJ-NP-Za-km-z]{33}'
+  '5[1-9A-HJ-NP-Za-km-z]{50}'
+  '[KL][1-9A-HJ-NP-Za-km-z]{51}'
+  'xprv[1-9A-HJ-NP-Za-km-z]{100,115}'
+  'xpub[1-9A-HJ-NP-Za-km-z]{100,115}'
+  '[yz]prv[1-9A-HJ-NP-Za-km-z]{100,115}'
+  '[yz]pub[1-9A-HJ-NP-Za-km-z]{100,115}'
+  '"ciphertext"[[:space:]]*:[[:space:]]*"[0-9a-fA-F]{64,}"'
+  '"crypto"[[:space:]]*:'
+  '"kdf"[[:space:]]*:'
+)
+
+PAT_LOW=(
+  'wallet\.dat'
+  'wallet'
+  'keystore'
+  'mnemonic'
+  'seed[ _.-]?phrase'
+  'recovery[ _.-]?phrase'
+  'restore[ _.-]?phrase'
+  'restoration[ _.-]?phrase'
+  'private[ _.-]?key'
+  'secret[ _.-]?key'
+  'UTC--[0-9]'
+  'bitcoin'
+  'ethereum'
+  'solana'
+  'monero'
+  'litecoin'
+  'dogecoin'
+  'metamask'
+  'ledger'
+  'trezor'
+  'electrum'
+  'exodus'
+  'phantom'
+  'coinbase'
+  'trust[ _.-]?wallet'
+)
+
+RE_HIGH="${(j:|:)PAT_HIGH}"
+RE_LOW="${(j:|:)PAT_LOW}"
+RE_ALL="${RE_HIGH}|${RE_LOW}"
+RE_FS_EXTRA='[0-9a-fA-F]{64}'
+RE_JPG_NAME='(wallet|seed|mnemonic|recovery|restore|backup|private[ _.-]?key|secret|passphrase|keystore|metamask|ledger|trezor|electrum|exodus|phantom|coinbase|trust[ _.-]?wallet|crypto|bitcoin|ethereum|solana|doge|litecoin|monero)'
+
+INTERESTING_EXTS=(
+  'wallet.dat'
+  '*.wallet'
+  '*.keystore'
+  '*.key'
+  '*.seed'
+  'UTC--*'
+  '*.aes.json'
+  '*.txt'
+  '*.md'
+  '*.rtf'
+  '*.csv'
+  '*.json'
+  '*.bak'
+  '*.old'
+  '*.note'
+  '*.text'
+  '*.pdf'
+  '*.png'
+  '*.zip'
+)
+
+FM_CONF="$OUTDIR/foremost.conf"
+cat > "$FM_CONF" <<'FMEOF'
+jpg  y 200000000 \xff\xd8\xff      \xff\xd9
+png  y 200000000 \x89\x50\x4e\x47 \x49\x45\x4e\x44
+pdf  y 200000000 %PDF-             %%EOF
+zip  y  50000000 PK\x03\x04
+FMEOF
+
+parent_of() {
+  sed -E 's/s[0-9]+$//' <<< "$1"
+}
+
+probe_read() {
+  dd if="$1" bs=512 count=1 of=/dev/null 2>/dev/null
+}
+
+partition_size_bytes() {
+  local part="$1"
+  diskutil info "/dev/$part" 2>/dev/null \
+    | awk '
+      /Disk Size:/ {
+        for (i=1; i<=NF; i++) {
+          if ($i ~ /^\([0-9,]+$/ || $i ~ /^[0-9,]+$/) {
+            gsub(/[^0-9]/, "", $i)
+            if ($i != "") { print $i; exit }
+          }
+        }
+      }'
+}
+
+is_system_or_container_partition() {
+  local info="$1"
+  local name type content mount
+
+  name=$(echo "$info" | awk -F: '/Volume Name:/ {$1=""; sub(/^[ \t]+/,""); print}')
+  type=$(echo "$info" | awk -F: '/Type \(Bundle\):/ {$1=""; sub(/^[ \t]+/,""); print}')
+  content=$(echo "$info" | awk -F: '/Partition Type:/ {$1=""; sub(/^[ \t]+/,""); print}')
+  mount=$(echo "$info" | awk -F: '/Mount Point:/ {$1=""; sub(/^[ \t]+/,""); print}')
+
+  case "${name:l}" in
+    efi|preboot|recovery|vm|update|xarts|hardware) return 0 ;;
+  esac
+
+  case "${type:l}" in
+    *efi*|*apfs*) return 0 ;;
+  esac
+
+  case "${content:l}" in
+    *efi*|*apple_partition_map*|*apple_partition_scheme*|*guid_partition_scheme*|*fdisk_partition_scheme*) return 0 ;;
+  esac
+
+  case "$mount" in
+    /System*|/private/var/vm*|/Volumes/Preboot*|/Volumes/Recovery*|/Volumes/VM*) return 0 ;;
+  esac
+
+  return 1
+}
+
+discover_target_partitions() {
+  local -a parents partitions
+
+  for disk in ${(f)"$(diskutil list | awk '/^\/dev\/disk[0-9]+/ {gsub("/dev/", "", $1); print $1}')"}; do
+    local info internal removable ejectable virtual protocol device_location
+
+    info=$(diskutil info "/dev/$disk" 2>/dev/null)
+    [[ -z "$info" ]] && continue
+
+    internal=$(echo "$info" | awk -F: '/Internal:/ {gsub(/^[ \t]+/,"",$2); print $2}')
+    removable=$(echo "$info" | awk -F: '/Removable Media:/ {gsub(/^[ \t]+/,"",$2); print $2}')
+    ejectable=$(echo "$info" | awk -F: '/Ejectable:/ {gsub(/^[ \t]+/,"",$2); print $2}')
+    virtual=$(echo "$info" | awk -F: '/Virtual:/ {gsub(/^[ \t]+/,"",$2); print $2}')
+    protocol=$(echo "$info" | awk -F: '/Protocol:/ {gsub(/^[ \t]+/,"",$2); print $2}')
+    device_location=$(echo "$info" | awk -F: '/Device Location:/ {gsub(/^[ \t]+/,"",$2); print $2}')
+
+    # Hard skips: internal Mac storage, APFS synthesized containers, disk images.
+    [[ "$internal" == "Yes" ]] && continue
+    [[ "$virtual" == "Yes" ]] && continue
+
+    # Broadly allow USB / SD / ejectable / removable / external devices.
+    if [[ "$removable" == "Yes" || \
+          "$ejectable" == "Yes" || \
+          "$protocol" == "USB" || \
+          "$protocol" == "Secure Digital" || \
+          "$protocol" == "SD" || \
+          "$device_location" == "External" ]]; then
+      parents+=("$disk")
+    fi
+  done
+
+  parents=("${(@u)parents}")
+
+  for parent in "${parents[@]}"; do
+    while IFS= read -r part; do
+      [[ -z "$part" ]] && continue
+      [[ ! "$part" =~ ^${parent}s[0-9]+$ ]] && continue
+
+      local pinfo
+      pinfo=$(diskutil info "/dev/$part" 2>/dev/null)
+      [[ -z "$pinfo" ]] && continue
+
+      if is_system_or_container_partition "$pinfo"; then
+        printf "Skipping system/container partition: %s\n" "$part" >> "$LOG"
+        continue
+      fi
+
+      partitions+=("$part")
+    done < <(diskutil list "/dev/$parent" 2>/dev/null | awk '/disk[0-9]+s[0-9]+$/ {print $NF}')
+  done
+
+  print -l "${(@u)partitions}"
+}
+
+raw_stream_with_progress() {
+  local src="$1"
+  local size="$2"
+  local label="$3"
+
+  if command -v pv >/dev/null 2>&1 && [[ -n "$size" && "$size" -gt 0 ]]; then
+    dd if="$src" bs="$BS" 2>>"$LOG" | pv -s "$size" -N "$label"
+  elif command -v pv >/dev/null 2>&1; then
+    dd if="$src" bs="$BS" 2>>"$LOG" | pv -N "$label"
+  else
+    echo "  pv not installed, using dd status=progress" > /dev/tty
+    dd if="$src" bs="$BS" status=progress 2>>"$LOG"
+  fi
+}
+
+bip39_stream_scan() {
+  local valid_file="$1"
+  local cand_file="$2"
+
+  python3 - "$valid_file" "$cand_file" <<'PY'
+import sys, re
+
+valid_file = sys.argv[1]
+cand_file = sys.argv[2]
+phrase_lengths = (12, 15, 18, 21, 24)
+token_re = re.compile(r"[a-zA-Z]{3,8}")
+
+try:
+    from mnemonic import Mnemonic
+    mnemo = Mnemonic("english")
+    wordset = set(mnemo.wordlist)
+except Exception:
+    open(valid_file, "w").close()
+    open(cand_file, "w").close()
+    sys.exit(0)
+
+valid_hits = set()
+candidate_hits = set()
+buf = []
+
+def check_buffer():
+    global buf
+    if len(buf) > 80:
+        buf = buf[-80:]
+    n = len(buf)
+    for start in range(max(0, n - 80), n):
+        for length in phrase_lengths:
+            end = start + length
+            if end > n:
+                continue
+            seq = buf[start:end]
+            if all(w in wordset for w in seq):
+                phrase = " ".join(seq)
+                candidate_hits.add(phrase)
+                try:
+                    if mnemo.check(phrase):
+                        valid_hits.add(phrase)
+                except Exception:
+                    pass
+
+for line in sys.stdin:
+    toks = [t.lower() for t in token_re.findall(line)]
+    if not toks:
+        continue
+    for t in toks:
+        if t in wordset:
+            buf.append(t)
+        else:
+            if len(buf) >= 12:
+                check_buffer()
+            buf = []
+    if len(buf) >= 12:
+        check_buffer()
+
+check_buffer()
+
+with open(valid_file, "w") as vf:
+    for h in sorted(valid_hits):
+        vf.write(h + "\n")
+
+with open(cand_file, "w") as cf:
+    for h in sorted(candidate_hits):
+        if h not in valid_hits:
+            cf.write(h + "\n")
+PY
+}
+
+fs_scan() {
+  local mount="$1"
+  local out_file="$2"
+  local label="$3"
+  local BAR_WIDTH=40
+  local fs_hits=0
+
+  : > "$out_file"
+
+  local -a files
+  files=("${(@f)$(find "$mount" -type f 2>/dev/null)}")
+  local total="${#files[@]}"
+
+  if [[ "$total" -eq 0 ]]; then
+    printf "  [fs] %s: no files\n" "$label" > /dev/tty
+    echo 0
+    return
+  fi
+
+  local current=0
+  for f in "${files[@]}"; do
+    (( current++ ))
+    local filled=$(( BAR_WIDTH * current / total ))
+    local empty=$(( BAR_WIDTH - filled ))
+    local bar="${(r:$filled::#:):-}${(r:$empty::-:):-}"
+    printf "\r  [fs] %s [%s] %d/%d files " "$label" "$bar" "$current" "$total" > /dev/tty
+
+    local reason=""
+    if LC_ALL=C grep -qiE "$RE_ALL" "$f" 2>/dev/null; then
+      reason="fs-crypto"
+    elif LC_ALL=C grep -qE "$RE_FS_EXTRA" "$f" 2>/dev/null; then
+      reason="fs-hex64"
+    fi
+
+    if [[ -n "$reason" ]]; then
+      (( fs_hits++ ))
+      printf "\n  \$\$ [%s] %s\n" "$reason" "$f" > /dev/tty
+      printf "%s\t%s\n" "$reason" "$f" >> "$out_file"
+      LC_ALL=C grep -iE "$RE_HIGH|$RE_FS_EXTRA" "$f" 2>/dev/null \
+        | head -3 \
+        | while IFS= read -r line; do
+            printf "     -> %s\n" "${line:0:120}" > /dev/tty
+          done
+    fi
+  done
+
+  printf "\n  [fs] %s: %d scanned, %d hit(s)\n" "$label" "$total" "$fs_hits" > /dev/tty
+  echo "$fs_hits"
+}
+
+ext_scan() {
+  local mount="$1"
+  local out_file="$2"
+
+  : > "$out_file"
+
+  for pat in "${INTERESTING_EXTS[@]}"; do
+    find "$mount" -iname "$pat" 2>/dev/null >> "$out_file" || true
+  done
+
+  sort -u -o "$out_file" "$out_file" 2>/dev/null || true
+  wc -l < "$out_file" | tr -d ' '
+}
+
+interesting_jpg_scan() {
+  local mount="$1"
+  local out_file="$2"
+
+  : > "$out_file"
+  find "$mount" -type f \( -iname '*.jpg' -o -iname '*.jpeg' \) -print 2>/dev/null \
+    | awk -F/ '{print $NF "\t" $0}' \
+    | LC_ALL=C grep -iE "$RE_JPG_NAME" \
+    | awk -F'\t' '{print $2}' \
+    >> "$out_file" || true
+  sort -u -o "$out_file" "$out_file" 2>/dev/null || true
+  wc -l < "$out_file" | tr -d ' '
+}
+
+preview_targets() {
+  local -a disks
+  disks=("$@")
+
+  echo "Targets:" | tee -a "$SUMMARY"
+  for part in "${disks[@]}"; do
+    echo "--- /dev/$part ---" | tee -a "$SUMMARY"
+    diskutil info "/dev/$part" 2>/dev/null \
+      | awk -F: '
+          /Device Identifier/ ||
+          /Device Node/ ||
+          /Volume Name/ ||
+          /Mounted/ ||
+          /Mount Point/ ||
+          /File System Personality/ ||
+          /Protocol/ ||
+          /Disk Size/ ||
+          /Device Location/ {
+            print "  "$0
+          }' | tee -a "$SUMMARY"
+    echo "" | tee -a "$SUMMARY"
+  done
+}
+
+scan_partition() {
+  local part="$1"
+  local parent
+  parent=$(parent_of "$part")
+
+  local RAW="/dev/r${part}"
+  local BLK="/dev/${part}"
+
+  local ALL_HITS="$OUTDIR/${part}_all_hits_with_offsets.txt"
+  local HIGH_TXT="$OUTDIR/${part}_high.txt"
+  local LOW_TXT="$OUTDIR/${part}_low.txt"
+  local VALID_BIP="$OUTDIR/${part}_bip39_valid.txt"
+  local CAND_BIP="$OUTDIR/${part}_bip39_candidates.txt"
+  local FS_TXT="$OUTDIR/${part}_fs_hits.txt"
+  local EXT_TXT="$OUTDIR/${part}_interesting_filenames.txt"
+  local JPG_TXT="$OUTDIR/${part}_interesting_jpg_files.txt"
+
+  local raw_high=0 raw_low=0 bip_valid=0 bip_candidate=0 fs_count=0 ext_count=0
+
+  printf "=== %s ===\n" "$part" | tee -a "$SUMMARY"
+
+  local SRC=""
+  if probe_read "$RAW"; then
+    SRC="$RAW"
+  elif probe_read "$BLK"; then
+    SRC="$BLK"
+  fi
+
+  : > "$ALL_HITS"
+  : > "$HIGH_TXT"
+  : > "$LOW_TXT"
+  : > "$VALID_BIP"
+  : > "$CAND_BIP"
+  : > "$FS_TXT"
+  : > "$EXT_TXT"
+  : > "$JPG_TXT"
+
+  if [[ -n "$SRC" ]]; then
+    local size
+    size=$(partition_size_bytes "$part")
+    [[ -z "$size" ]] && size=0
+
+    printf "  [raw] %s, bs=%s, size=%s bytes\n" "$SRC" "$BS" "$size" | tee -a "$SUMMARY"
+
+    local RAW_TMP="$OUTDIR/${part}_raw_strings.tmp"
+    : > "$RAW_TMP"
+
+    # One raw stream pass. Store temporary strings for BIP39 and regex split.
+    # This avoids re-reading the physical device while keeping no disk image.
+    raw_stream_with_progress "$SRC" "$size" "$part" \
+      | strings -a -n "$MIN_STR" -t x 2>>"$LOG" \
+      > "$RAW_TMP"
+
+    LC_ALL=C grep -iE "$RE_ALL" "$RAW_TMP" | sort -u > "$ALL_HITS" || true
+
+    LC_ALL=C grep -iE "$RE_HIGH" "$ALL_HITS" \
+      | awk '{$1=""; sub(/^ /,""); print}' \
+      | sort -u > "$HIGH_TXT" || true
+
+    LC_ALL=C grep -iE "$RE_LOW" "$ALL_HITS" \
+      | awk '{$1=""; sub(/^ /,""); print}' \
+      | sort -u > "$LOW_TXT" || true
+
+    awk '{$1=""; sub(/^ /,""); print}' "$RAW_TMP" \
+      | bip39_stream_scan "$VALID_BIP" "$CAND_BIP"
+
+    rm -f "$RAW_TMP"
+
+    raw_high=$(wc -l < "$HIGH_TXT" | tr -d ' ')
+    raw_low=$(wc -l < "$LOW_TXT" | tr -d ' ')
+    bip_valid=$(wc -l < "$VALID_BIP" | tr -d ' ')
+    bip_candidate=$(wc -l < "$CAND_BIP" | tr -d ' ')
+
+    printf "\n  [raw] HIGH=%s LOW=%s BIP39_valid=%s BIP39_candidate=%s\n" \
+      "$raw_high" "$raw_low" "$bip_valid" "$bip_candidate" | tee -a "$SUMMARY"
+
+    if [[ "$raw_high" -gt 0 ]]; then
+      echo "  [raw] HIGH first 60:" | tee -a "$SUMMARY"
+      head -60 "$HIGH_TXT" | sed 's/^/    /' | tee -a "$SUMMARY"
+      echo "  [raw] offsets: $ALL_HITS" | tee -a "$SUMMARY"
+    fi
+
+    if [[ "$raw_low" -gt 0 ]]; then
+      echo "  [raw] LOW first 25:" | tee -a "$SUMMARY"
+      head -25 "$LOW_TXT" | sed 's/^/    /' | tee -a "$SUMMARY"
+    fi
+
+    if [[ "$bip_valid" -gt 0 ]]; then
+      echo "  [bip39] VALID checksum phrases:" | tee -a "$SUMMARY"
+      head -40 "$VALID_BIP" | sed 's/^/    /' | tee -a "$SUMMARY"
+    fi
+
+    if [[ "$bip_candidate" -gt 0 ]]; then
+      echo "  [bip39] candidate phrases, checksum not valid:" | tee -a "$SUMMARY"
+      head -40 "$CAND_BIP" | sed 's/^/    /' | tee -a "$SUMMARY"
+    fi
+  else
+    printf "  [raw] skipped, no read access. Add Terminal to Full Disk Access.\n" | tee -a "$SUMMARY"
+  fi
+
+  local mount_point=""
+  mount_point=$(diskutil info "/dev/$part" 2>/dev/null \
+    | awk '/Mount Point:/ {$1=$2=""; sub(/^[[:space:]]+/,""); print}') || true
+
+  if [[ "$RUN_FS_SCAN" -eq 1 && -n "$mount_point" && -d "$mount_point" ]]; then
+    printf "  [fs] %s\n" "$mount_point" | tee -a "$SUMMARY"
+    fs_count=$(fs_scan "$mount_point" "$FS_TXT" "$part")
+
+    if [[ "$fs_count" -gt 0 ]]; then
+      echo "  [fs] matching files:" | tee -a "$SUMMARY"
+      sed 's/^/    /' "$FS_TXT" | tee -a "$SUMMARY"
+    fi
+
+    if [[ "$RUN_EXT_SCAN" -eq 1 ]]; then
+      ext_count=$(ext_scan "$mount_point" "$EXT_TXT")
+      if [[ "$ext_count" -gt 0 ]]; then
+        echo "  [fs] interesting filenames: $ext_count" | tee -a "$SUMMARY"
+        head -80 "$EXT_TXT" | sed 's/^/    /' | tee -a "$SUMMARY"
+      fi
+    fi
+
+    if [[ "$SHOW_ALL_JPG" -eq 1 ]]; then
+      local jpg_count=0
+      jpg_count=$(interesting_jpg_scan "$mount_point" "$JPG_TXT")
+      echo "  [jpg] interesting JPG/JPEG filenames: $jpg_count" | tee -a "$SUMMARY"
+      if [[ "$jpg_count" -gt 0 ]]; then
+        head -120 "$JPG_TXT" | sed 's/^/    /' | tee -a "$SUMMARY"
+      fi
+    fi
+  else
+    printf "  [fs] not mounted or disabled\n" | tee -a "$SUMMARY"
+  fi
+
+  local strong_total=$(( raw_high + bip_valid ))
+  if [[ "$RUN_FOREMOST_ON_STRONG_HITS" -eq 1 && "$strong_total" -gt 0 && -n "$SRC" ]] \
+      && command -v foremost >/dev/null 2>&1; then
+    printf "  [foremost] strong hits found, carving %s\n" "$part" | tee -a "$SUMMARY"
+
+    local FMOUT="$OUTDIR/foremost_${part}"
+    rm -rf "$FMOUT"
+
+    foremost -c "$FM_CONF" -T -Q -i "$SRC" -o "$FMOUT" 2>>"$LOG" || true
+
+    if [[ -f "$FMOUT/audit.txt" ]]; then
+      grep -v "^$" "$FMOUT/audit.txt" | tail -40 | tee -a "$SUMMARY"
+    fi
+  fi
+
+  local total=$(( raw_high + raw_low + bip_valid + bip_candidate + fs_count + ext_count ))
+
+  if [[ "$total" -gt 0 ]]; then
+    PARENT_HAS_HITS[$parent]=1
+    echo "$parent,$part,$raw_high,$raw_low,$bip_valid,$bip_candidate,$fs_count,$ext_count,keep" >> "$CSV"
+  else
+    echo "$parent,$part,0,0,0,0,0,0,no_hits" >> "$CSV"
+    printf "  No crypto hits.\n" | tee -a "$SUMMARY"
+  fi
+
+  printf "\n" | tee -a "$SUMMARY"
+}
+
+# ── Main ─────────────────────────────────────────────────────────────────────
+DISKS=("${(@f)$(discover_target_partitions)}")
+
+if [[ ${#DISKS[@]} -eq 0 ]]; then
+  echo "No USB drives or SD-card-style external partitions found." | tee -a "$SUMMARY"
+  echo "Check: diskutil list" | tee -a "$SUMMARY"
+  exit 1
+fi
+
+printf "Partitions selected: %s\n\n" "${DISKS[*]}" | tee -a "$SUMMARY"
+preview_targets "${DISKS[@]}"
+
+typeset -A PARENT_HAS_HITS
+typeset -A PARENT_PARTS
+
+for part in "${DISKS[@]}"; do
+  parent=$(parent_of "$part")
+  PARENT_PARTS[$parent]+=" $part"
+  PARENT_HAS_HITS[$parent]=0
+done
+
+# Serial is deliberate. Parallel scans usually saturate shared USB/SD buses and get slower.
+for part in "${DISKS[@]}"; do
+  scan_partition "$part"
+done
+
+printf "=== Eject decision ===\n" | tee -a "$SUMMARY"
+
+for parent in ${(k)PARENT_PARTS}; do
+  if [[ "${PARENT_HAS_HITS[$parent]}" -eq 1 ]]; then
+    printf "  KEEP  /dev/%s, hits found on:%s\n" "$parent" "${PARENT_PARTS[$parent]}" | tee -a "$SUMMARY"
+    echo "$parent,ALL,-,-,-,-,-,-,kept_hits" >> "$CSV"
+  else
+    printf "  CLEAN /dev/%s, no hits on:%s\n" "$parent" "${PARENT_PARTS[$parent]}" | tee -a "$SUMMARY"
+
+    if [[ "$AUTO_EJECT_NO_HITS" -eq 1 ]]; then
+      diskutil eject "/dev/$parent" 2>&1 | tee -a "$SUMMARY" || true
+      echo "$parent,ALL,0,0,0,0,0,0,ejected" >> "$CSV"
+    else
+      printf "    auto-eject disabled\n" | tee -a "$SUMMARY"
+      echo "$parent,ALL,0,0,0,0,0,0,kept_clean" >> "$CSV"
+    fi
+  fi
+done
+
+printf "\nScan finished: %s\n" "$(date)" | tee -a "$SUMMARY"
+
+printf "\nOutput:\n"
+printf "  Summary: %s\n" "$SUMMARY"
+printf "  CSV:     %s\n" "$CSV"
+printf "  Log:     %s\n" "$LOG"
+printf "  High:    %s/*_high.txt\n" "$OUTDIR"
+printf "  Low:     %s/*_low.txt\n" "$OUTDIR"
+printf "  BIP39:   %s/*_bip39_valid.txt and *_bip39_candidates.txt\n" "$OUTDIR"
+printf "  Offsets: %s/*_all_hits_with_offsets.txt\n\n" "$OUTDIR"
