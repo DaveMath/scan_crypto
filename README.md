@@ -29,6 +29,14 @@ This lets you rapidly focus attention on the media most likely to contain releva
 sudo zsh scan_crypto_v5.sh
 ```
 
+Python requirement:
+- Python 3 (`python3`) is required.
+- Optional but recommended BIP39 validation dependency:
+
+```bash
+python3 -m pip install mnemonic
+```
+
 Optional modes:
 
 ```bash
