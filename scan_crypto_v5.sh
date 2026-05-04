@@ -40,6 +40,7 @@
 set -uo pipefail
 export LC_ALL=C
 export LANG=C
+SCRIPT_VERSION="v5.2.0"
 
 SHOW_ALL_JPG=0
 AUTO_EJECT_OVERRIDE=""
@@ -54,9 +55,13 @@ while [[ $# -gt 0 ]]; do
       AUTO_EJECT_OVERRIDE=0
       shift
       ;;
+    --version)
+      echo "scan_crypto_v5.sh ${SCRIPT_VERSION}"
+      exit 0
+      ;;
     *)
       echo "Unknown argument: $1" >&2
-      echo "Usage: sudo zsh $0 [--all-jpg] [--no-auto-eject]" >&2
+      echo "Usage: sudo zsh $0 [--all-jpg] [--no-auto-eject] [--version]" >&2
       exit 1
       ;;
   esac
@@ -80,6 +85,7 @@ LOG="$OUTDIR/run.log"
 echo "parent,partition,raw_high,raw_low,bip39_valid,bip39_candidate,fs_hits,ext_hits,action" > "$CSV"
 
 printf "Scan started: %s\n" "$(date)" | tee -a "$SUMMARY"
+printf "Script version: %s\n" "$SCRIPT_VERSION" | tee -a "$SUMMARY"
 printf "Output directory: %s\n\n" "$OUTDIR" | tee -a "$SUMMARY"
 printf "Searching for: wallet files, crypto address/key patterns, BIP39 seed phrases, and interesting filenames (including JPG/JPEG).\n\n" | tee -a "$SUMMARY"
 
@@ -435,7 +441,7 @@ ext_scan() {
     find "$mount" -iname "$pat" 2>/dev/null >> "$out_file" || true
   done
 
-  sort -u -o "$out_file" "$out_file" 2>/dev/null || true
+  LC_ALL=C sort -u -o "$out_file" "$out_file" 2>/dev/null || true
   wc -l < "$out_file" | tr -d ' '
 }
 
@@ -449,7 +455,7 @@ interesting_jpg_scan() {
     | LC_ALL=C grep -iE "$RE_JPG_NAME" \
     | awk -F'\t' '{print $2}' \
     >> "$out_file" || true
-  sort -u -o "$out_file" "$out_file" 2>/dev/null || true
+  LC_ALL=C sort -u -o "$out_file" "$out_file" 2>/dev/null || true
   wc -l < "$out_file" | tr -d ' '
 }
 
@@ -533,17 +539,17 @@ scan_partition() {
       | strings -a -n "$MIN_STR" -t x 2>>"$LOG" \
       > "$RAW_TMP"
 
-    LC_ALL=C grep -iE "$RE_ALL" "$RAW_TMP" | sort -u > "$ALL_HITS" || true
+    LC_ALL=C grep -a -iE "$RE_ALL" "$RAW_TMP" | LC_ALL=C sort -u > "$ALL_HITS" || true
 
-    LC_ALL=C grep -iE "$RE_HIGH" "$ALL_HITS" \
-      | LC_ALL=C awk '{$1=""; sub(/^ /,""); print}' \
-      | sort -u > "$HIGH_TXT" || true
+    LC_ALL=C grep -a -iE "$RE_HIGH" "$ALL_HITS" \
+      | LC_ALL=C cut -d' ' -f2- \
+      | LC_ALL=C sort -u > "$HIGH_TXT" || true
 
-    LC_ALL=C grep -iE "$RE_LOW" "$ALL_HITS" \
-      | LC_ALL=C awk '{$1=""; sub(/^ /,""); print}' \
-      | sort -u > "$LOW_TXT" || true
+    LC_ALL=C grep -a -iE "$RE_LOW" "$ALL_HITS" \
+      | LC_ALL=C cut -d' ' -f2- \
+      | LC_ALL=C sort -u > "$LOW_TXT" || true
 
-    LC_ALL=C awk '{$1=""; sub(/^ /,""); print}' "$RAW_TMP" \
+    LC_ALL=C cut -d' ' -f2- "$RAW_TMP" \
       | bip39_stream_scan "$VALID_BIP" "$CAND_BIP"
 
     rm -f "$RAW_TMP"

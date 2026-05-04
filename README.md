@@ -1,5 +1,7 @@
 # scan_cyrpto
 
+Current script version: `v5.2.0`
+
 `scan_crypto_v5.sh` is a powerful read-only crypto forensic triage utility for macOS.
 
 It is built to quickly scan removable media for crypto-related evidence at scale, including:
@@ -42,6 +44,7 @@ Optional modes:
 ```bash
 sudo zsh scan_crypto_v5.sh --all-jpg
 sudo zsh scan_crypto_v5.sh --no-auto-eject
+sudo zsh scan_crypto_v5.sh --version
 ```
 
 ## Outputs
