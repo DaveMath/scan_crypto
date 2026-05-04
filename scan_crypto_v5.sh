@@ -281,13 +281,24 @@ raw_stream_with_progress() {
   local label="$3"
 
   if command -v pv >/dev/null 2>&1 && [[ -n "$size" && "$size" -gt 0 ]]; then
-    dd if="$src" bs="$BS" 2>>"$LOG" | pv -s "$size" -N "$label"
+    dd if="$src" bs="$BS" iflag=fullblock 2>>"$LOG" | pv -f -s "$size" -N "$label"
   elif command -v pv >/dev/null 2>&1; then
-    dd if="$src" bs="$BS" 2>>"$LOG" | pv -N "$label"
+    dd if="$src" bs="$BS" iflag=fullblock 2>>"$LOG" | pv -f -N "$label"
   else
     echo "  pv not installed, using dd status=progress" > /dev/tty
-    dd if="$src" bs="$BS" status=progress 2>>"$LOG"
+    dd if="$src" bs="$BS" iflag=fullblock status=progress 2>>"$LOG"
   fi
+}
+
+phase_progress() {
+  local label="$1"
+  local step="$2"
+  local total="$3"
+  local width=24
+  local filled=$(( width * step / total ))
+  local empty=$(( width - filled ))
+  local bar="${(r:$filled::#:):-}${(r:$empty::-:):-}"
+  printf "  [%s] [%s] %d/%d\n" "$label" "$bar" "$step" "$total" | tee -a "$SUMMARY"
 }
 
 bip39_stream_scan() {
@@ -483,7 +494,9 @@ scan_partition() {
 
   local raw_high=0 raw_low=0 bip_valid=0 bip_candidate=0 fs_count=0 ext_count=0
 
+  local phase_total=4
   printf "=== %s ===\n" "$part" | tee -a "$SUMMARY"
+  phase_progress "scan" 0 "$phase_total"
 
   local SRC=""
   if probe_read "$RAW"; then
@@ -502,6 +515,7 @@ scan_partition() {
   : > "$JPG_TXT"
 
   if [[ -n "$SRC" ]]; then
+    phase_progress "scan" 1 "$phase_total"
     local size
     size=$(partition_size_bytes "$part")
     [[ -z "$size" ]] && size=0
@@ -569,6 +583,7 @@ scan_partition() {
     | awk '/Mount Point:/ {$1=$2=""; sub(/^[[:space:]]+/,""); print}') || true
 
   if [[ "$RUN_FS_SCAN" -eq 1 && -n "$mount_point" && -d "$mount_point" ]]; then
+    phase_progress "scan" 2 "$phase_total"
     printf "  [fs] %s\n" "$mount_point" | tee -a "$SUMMARY"
     fs_count=$(fs_scan "$mount_point" "$FS_TXT" "$part")
 
@@ -578,6 +593,7 @@ scan_partition() {
     fi
 
     if [[ "$RUN_EXT_SCAN" -eq 1 ]]; then
+      phase_progress "scan" 3 "$phase_total"
       ext_count=$(ext_scan "$mount_point" "$EXT_TXT")
       if [[ "$ext_count" -gt 0 ]]; then
         echo "  [fs] interesting filenames: $ext_count" | tee -a "$SUMMARY"
@@ -600,6 +616,7 @@ scan_partition() {
   local strong_total=$(( raw_high + bip_valid ))
   if [[ "$RUN_FOREMOST_ON_STRONG_HITS" -eq 1 && "$strong_total" -gt 0 && -n "$SRC" ]] \
       && command -v foremost >/dev/null 2>&1; then
+    phase_progress "scan" 4 "$phase_total"
     printf "  [foremost] strong hits found, carving %s\n" "$part" | tee -a "$SUMMARY"
 
     local FMOUT="$OUTDIR/foremost_${part}"
