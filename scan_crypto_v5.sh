@@ -627,7 +627,8 @@ scan_partition() {
 
 # ── Main ─────────────────────────────────────────────────────────────────────
 DISKS=("${(@f)$(discover_target_partitions)}")
-DISKS=("${(@M)DISKS:#disk[0-9]##s[0-9]##}")
+# Defensive sanitize: only keep disk identifiers like disk10s1.
+DISKS=("${(@f)$(printf '%s\n' "${DISKS[@]}" | LC_ALL=C grep -E '^disk[0-9]+s[0-9]+$' || true)}")
 
 if [[ ${#DISKS[@]} -eq 0 ]]; then
   echo "No USB drives or SD-card-style external partitions found." | tee -a "$SUMMARY"
