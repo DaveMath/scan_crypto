@@ -1,6 +1,6 @@
 # scan_cyrpto
 
-Current script version: `v5.8.0`
+Current script version: `v5.9.0`
 
 `scan_crypto_v5.sh` is a powerful read-only crypto forensic triage utility for macOS.
 
@@ -55,9 +55,9 @@ sudo zsh scan_crypto_v5.sh --version
 ## Outputs
 
 By default, output is written to:
-- `~/Documents/crypto_scan/summary.txt`
-- `~/Documents/crypto_scan/results.csv`
-- `~/Documents/crypto_scan/run.log`
+- `~/Documents/crypto_scan/run_YYYYMMDD_HHMMSS/summary.txt`
+- `~/Documents/crypto_scan/run_YYYYMMDD_HHMMSS/results.csv`
+- `~/Documents/crypto_scan/run_YYYYMMDD_HHMMSS/run.log`
 
 Plus per-partition hit artifacts for deeper review.
 

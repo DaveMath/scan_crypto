@@ -40,11 +40,12 @@
 set -uo pipefail
 export LC_ALL=C
 export LANG=C
-SCRIPT_VERSION="v5.8.0"
+SCRIPT_VERSION="v5.9.0"
 
 SHOW_ALL_JPG=0
 AUTO_EJECT_OVERRIDE=""
-OUTDIR="$HOME/Documents/crypto_scan"
+OUTDIR_ROOT="$HOME/Documents/crypto_scan"
+OUTDIR=""
 FORCE_DEEP_SCAN=0
 FAST_MODE=0
 MIN_FREE_GB=20
@@ -76,7 +77,7 @@ while [[ $# -gt 0 ]]; do
         echo "Missing value for --outdir" >&2
         exit 1
       fi
-      OUTDIR="$2"
+      OUTDIR_ROOT="$2"
       shift 2
       ;;
     --min-free-gb)
@@ -100,6 +101,9 @@ if [[ $EUID -ne 0 ]]; then
   exit 1
 fi
 
+# Create a unique run directory each execution.
+RUN_ID="$(/bin/date +%Y%m%d_%H%M%S)"
+OUTDIR="${OUTDIR_ROOT}/run_${RUN_ID}"
 mkdir -p "$OUTDIR"
 
 SUMMARY="$OUTDIR/summary.txt"
