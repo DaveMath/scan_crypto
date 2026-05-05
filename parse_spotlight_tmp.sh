@@ -1,21 +1,29 @@
 #!/bin/zsh
 set -euo pipefail
 
-# Parse tmp artifacts from scan_crypto_v5 and run spotlight_parser when available.
+# Parse artifacts from scan_crypto and run spotlight_parser when available.
 # Output is paged via `more`.
 
-OUTDIR="${1:-$HOME/Documents/scan_crypto}"
-CSV="$OUTDIR/results.csv"
-REPORT="$OUTDIR/spotlight_parse_report.txt"
+BASE_DIR="${1:-$HOME/Documents/scan_crypto}"
+OUTDIR="$BASE_DIR"
 
-if [[ ! -d "$OUTDIR" ]]; then
-  echo "Missing directory: $OUTDIR" >&2
+if [[ ! -d "$BASE_DIR" ]]; then
+  echo "Missing directory: $BASE_DIR" >&2
   exit 1
 fi
 
+# If a run_YYYYMMDD_HHMMSS directory exists, pick the newest run automatically.
+latest_run="$(find "$BASE_DIR" -maxdepth 1 -type d -name 'run_*' | sort | tail -1)"
+if [[ -n "$latest_run" ]]; then
+  OUTDIR="$latest_run"
+fi
+
+CSV="$OUTDIR/results.csv"
+REPORT="$OUTDIR/spotlight_parse_report.txt"
+
 if [[ ! -f "$CSV" ]]; then
   echo "Missing results file: $CSV" >&2
-  echo "Run scan_crypto_v5.sh first." >&2
+  echo "Run scan_crypto.sh first." >&2
   exit 1
 fi
 
@@ -91,7 +99,7 @@ run_spotlight_parse() {
 {
   echo "Spotlight Temp Parse Report"
   echo "Generated: $(date)"
-  echo "Source tmp dir: $OUTDIR"
+  echo "Source run dir: $OUTDIR"
   echo
 } > "$REPORT"
 
