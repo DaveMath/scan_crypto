@@ -40,7 +40,7 @@
 set -uo pipefail
 export LC_ALL=C
 export LANG=C
-SCRIPT_VERSION="v5.9.0"
+SCRIPT_VERSION="v6.0.1"
 
 SHOW_ALL_JPG=0
 AUTO_EJECT_OVERRIDE=""
@@ -164,6 +164,8 @@ RUN_FOREMOST_ON_STRONG_HITS=1
 RUN_FS_SCAN=1
 RUN_EXT_SCAN=1
 [[ -n "$AUTO_EJECT_OVERRIDE" ]] && AUTO_EJECT_NO_HITS="$AUTO_EJECT_OVERRIDE"
+IMAGE_HITS_DIR="$OUTDIR/image_hits"
+mkdir -p "$IMAGE_HITS_DIR"
 
 PAT_HIGH=(
   'bc1[a-zA-HJ-NP-Z0-9]{25,90}'
@@ -214,6 +216,7 @@ RE_HIGH="${(j:|:)PAT_HIGH}"
 RE_LOW="${(j:|:)PAT_LOW}"
 RE_ALL="${RE_HIGH}|${RE_LOW}"
 RE_FS_EXTRA='[0-9a-fA-F]{64}'
+RE_EXCLUDE='(uits|amazon|amzn|drm|widevine|playready|fairplay|signature|rsa2048|sha256|manifest|license|x-amz|etag|content-md5)'
 RE_JPG_NAME='(wallet|seed|mnemonic|recovery|restore|backup|private[ _.-]?key|secret|passphrase|keystore|metamask|ledger|trezor|electrum|exodus|phantom|coinbase|trust[ _.-]?wallet|crypto|bitcoin|ethereum|solana|doge|litecoin|monero)'
 
 INTERESTING_EXTS=(
@@ -494,7 +497,7 @@ fs_scan() {
       "$label" "$bar" "$current" "$total" "$pct" > /dev/tty
 
     local reason=""
-    if LC_ALL=C grep -qiE "$RE_ALL" "$f" 2>/dev/null; then
+    if LC_ALL=C grep -a -qiE "$RE_ALL" "$f" 2>/dev/null && ! LC_ALL=C grep -a -qiE "$RE_EXCLUDE" "$f" 2>/dev/null; then
       reason="fs-crypto"
     elif LC_ALL=C grep -qE "$RE_FS_EXTRA" "$f" 2>/dev/null; then
       reason="fs-hex64"
@@ -504,7 +507,8 @@ fs_scan() {
       (( fs_hits++ ))
       printf "\n  \$\$ [%s] %s\n" "$reason" "$f" > /dev/tty
       printf "%s\t%s\n" "$reason" "$f" >> "$out_file"
-      LC_ALL=C grep -iE "$RE_HIGH|$RE_FS_EXTRA" "$f" 2>/dev/null \
+      LC_ALL=C grep -a -iE "$RE_HIGH|$RE_FS_EXTRA" "$f" 2>/dev/null \
+        | LC_ALL=C grep -a -ivE "$RE_EXCLUDE" \
         | /usr/bin/head -3 \
         | while IFS= read -r line; do
             printf "     -> %s\n" "${line:0:120}" > /dev/tty
@@ -542,6 +546,38 @@ interesting_jpg_scan() {
     >> "$out_file" || true
   LC_ALL=C sort -u -o "$out_file" "$out_file" 2>/dev/null || true
   wc -l < "$out_file" | tr -d ' '
+}
+
+triage_recovered_images() {
+  local carve_dir="$1"
+  local part="$2"
+  local hit_count=0
+  local ocr_tool=""
+
+  if command -v tesseract >/dev/null 2>&1; then
+    ocr_tool="tesseract"
+  fi
+
+  if [[ -z "$ocr_tool" ]]; then
+    echo "  [img] OCR skipped (install tesseract to enable screenshot key/balance triage)" | /usr/bin/tee -a "$SUMMARY"
+    return
+  fi
+
+  local -a images
+  images=("${(@f)$(/usr/bin/find "$carve_dir" -type f \\( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' \\) 2>/dev/null)}")
+  [[ ${#images[@]} -eq 0 ]] && return
+
+  local re='(recovery phrase|secret recovery|seed phrase|mnemonic|wallet|bitcoin|btc|balance|xpub|xprv|bc1[[:alnum:]]{8,}|\\$[0-9]{1,3}(,[0-9]{3})*(\\.[0-9]{2})?)'
+  local img txt
+  for img in "${images[@]}"; do
+    txt="$($ocr_tool "$img" stdout 2>/dev/null | /usr/bin/tr '[:upper:]' '[:lower:]' || true)"
+    if [[ -n "$txt" ]] && echo "$txt" | /usr/bin/grep -Eiq "$re"; then
+      hit_count=$((hit_count + 1))
+      /bin/cp -f "$img" "$IMAGE_HITS_DIR/${part}_$(/usr/bin/basename "$img")" 2>/dev/null || true
+    fi
+  done
+
+  echo "  [img] OCR triage complete: ${hit_count} image hit(s) copied to $IMAGE_HITS_DIR" | /usr/bin/tee -a "$SUMMARY"
 }
 
 preview_targets() {
@@ -629,14 +665,18 @@ scan_partition() {
       | strings -a -n "$MIN_STR" -t x 2>>"$LOG" \
       > "$RAW_TMP"
 
-    LC_ALL=C grep -a -iE "$RE_ALL" "$RAW_TMP" | LC_ALL=C sort -u > "$ALL_HITS" || true
+    LC_ALL=C grep -a -iE "$RE_ALL" "$RAW_TMP" \
+      | LC_ALL=C grep -a -ivE "$RE_EXCLUDE" \
+      | LC_ALL=C sort -u > "$ALL_HITS" || true
 
     LC_ALL=C grep -a -iE "$RE_HIGH" "$ALL_HITS" \
       | LC_ALL=C cut -d' ' -f2- \
+      | LC_ALL=C grep -a -ivE "$RE_EXCLUDE" \
       | LC_ALL=C sort -u > "$HIGH_TXT" || true
 
     LC_ALL=C grep -a -iE "$RE_LOW" "$ALL_HITS" \
       | LC_ALL=C cut -d' ' -f2- \
+      | LC_ALL=C grep -a -ivE "$RE_EXCLUDE" \
       | LC_ALL=C sort -u > "$LOW_TXT" || true
 
     LC_ALL=C cut -d' ' -f2- "$RAW_TMP" \
@@ -738,6 +778,7 @@ scan_partition() {
     if [[ -f "$FMOUT/audit.txt" ]]; then
       /usr/bin/grep -v "^$" "$FMOUT/audit.txt" | /usr/bin/tail -40 | /usr/bin/tee -a "$SUMMARY"
     fi
+    triage_recovered_images "$FMOUT" "$part"
   fi
 
   local total=$(( raw_high + raw_low + bip_valid + bip_candidate + fs_count + ext_count ))
