@@ -40,13 +40,14 @@
 set -uo pipefail
 export LC_ALL=C
 export LANG=C
-SCRIPT_VERSION="v5.5.0"
+SCRIPT_VERSION="v5.6.1"
 
 SHOW_ALL_JPG=0
 AUTO_EJECT_OVERRIDE=""
 OUTDIR="$HOME/Documents/crypto_scan"
 FORCE_DEEP_SCAN=0
 FAST_MODE=0
+MIN_FREE_GB=20
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -78,9 +79,17 @@ while [[ $# -gt 0 ]]; do
       OUTDIR="$2"
       shift 2
       ;;
+    --min-free-gb)
+      if [[ $# -lt 2 ]]; then
+        echo "Missing value for --min-free-gb" >&2
+        exit 1
+      fi
+      MIN_FREE_GB="$2"
+      shift 2
+      ;;
     *)
       echo "Unknown argument: $1" >&2
-      echo "Usage: sudo zsh $0 [--all-jpg] [--fast] [--deep] [--no-auto-eject] [--outdir <path>] [--version]" >&2
+      echo "Usage: sudo zsh $0 [--all-jpg] [--fast] [--deep] [--no-auto-eject] [--outdir <path>] [--min-free-gb <N>] [--version]" >&2
       exit 1
       ;;
   esac
@@ -97,6 +106,32 @@ SUMMARY="$OUTDIR/summary.txt"
 CSV="$OUTDIR/results.csv"
 LOG="$OUTDIR/run.log"
 
+bytes_free_for_path() {
+  local path="$1"
+  df -k "$path" 2>/dev/null | awk 'NR==2 {print $4 * 1024}'
+}
+
+ensure_min_free_or_exit() {
+  local path="$1"
+  local phase="$2"
+  local free_bytes
+  local min_bytes
+
+  free_bytes=$(bytes_free_for_path "$path")
+  min_bytes=$(( MIN_FREE_GB * 1024 * 1024 * 1024 ))
+
+  if [[ -z "$free_bytes" ]]; then
+    echo "Could not determine free space for $path during $phase." | tee -a "$SUMMARY"
+    exit 1
+  fi
+
+  if (( free_bytes < min_bytes )); then
+    echo "ABORT: low disk space during $phase. Free=${free_bytes} bytes, required minimum=${min_bytes} bytes (${MIN_FREE_GB} GiB)." | tee -a "$SUMMARY"
+    echo "Use --outdir to another volume or lower reserve with --min-free-gb." | tee -a "$SUMMARY"
+    exit 1
+  fi
+}
+
 : > "$SUMMARY"
 : > "$LOG"
 
@@ -105,6 +140,7 @@ echo "parent,partition,raw_high,raw_low,bip39_valid,bip39_candidate,fs_hits,ext_
 printf "Scan started: %s\n" "$(date)" | tee -a "$SUMMARY"
 printf "Script version: %s\n" "$SCRIPT_VERSION" | tee -a "$SUMMARY"
 printf "Output directory: %s\n\n" "$OUTDIR" | tee -a "$SUMMARY"
+printf "Storage safety reserve: %s GiB free minimum\n\n" "$MIN_FREE_GB" | tee -a "$SUMMARY"
 printf "Tip: use --outdir to store results elsewhere.\n\n" | tee -a "$SUMMARY"
 printf "Searching for: wallet files, crypto address/key patterns, BIP39 seed phrases, and interesting filenames (including JPG/JPEG).\n\n" | tee -a "$SUMMARY"
 printf "Status: initializing device discovery...\n\n" | tee -a "$SUMMARY"
@@ -113,6 +149,8 @@ if [[ "$FAST_MODE" -eq 1 ]]; then
 else
   printf "Scan profile: speed-first (raw triage first; fs/ext scans run only when raw indicators exist). Use --deep to force full mounted-filesystem scanning.\n\n" | tee -a "$SUMMARY"
 fi
+
+ensure_min_free_or_exit "$OUTDIR" "startup"
 
 BS=64m
 MIN_STR=6
@@ -563,6 +601,7 @@ scan_partition() {
   : > "$JPG_TXT"
 
   if [[ -n "$SRC" ]]; then
+    ensure_min_free_or_exit "$OUTDIR" "pre-raw-scan"
     phase_progress "scan" 1 "$phase_total"
     local size
     size=$(partition_size_bytes "$part")
@@ -574,6 +613,7 @@ scan_partition() {
     printf "  [raw] %s, bs=%s, size=%s bytes\n" "$SRC" "$BS" "$size" | tee -a "$SUMMARY"
 
     local RAW_TMP="$OUTDIR/${part}_raw_strings.tmp"
+    ensure_min_free_or_exit "$OUTDIR" "pre-raw-temp-create"
     : > "$RAW_TMP"
 
     # One raw stream pass. Store temporary strings for BIP39 and regex split.
@@ -679,6 +719,7 @@ scan_partition() {
   local strong_total=$(( raw_high + bip_valid ))
   if [[ "$RUN_FOREMOST_ON_STRONG_HITS" -eq 1 && "$strong_total" -gt 0 && -n "$SRC" ]] \
       && command -v foremost >/dev/null 2>&1; then
+    ensure_min_free_or_exit "$OUTDIR" "pre-foremost-carving"
     phase_progress "scan" 4 "$phase_total"
     printf "  [foremost] strong hits found, carving %s\n" "$part" | tee -a "$SUMMARY"
 

@@ -1,6 +1,6 @@
 # scan_cyrpto
 
-Current script version: `v5.5.0`
+Current script version: `v5.6.1`
 
 `scan_crypto_v5.sh` is a powerful read-only crypto forensic triage utility for macOS.
 
@@ -48,6 +48,7 @@ sudo zsh scan_crypto_v5.sh --fast
 sudo zsh scan_crypto_v5.sh --deep
 sudo zsh scan_crypto_v5.sh --no-auto-eject
 sudo zsh scan_crypto_v5.sh --outdir ~/Documents/crypto_scan
+sudo zsh scan_crypto_v5.sh --min-free-gb 30
 sudo zsh scan_crypto_v5.sh --version
 ```
 
@@ -89,6 +90,19 @@ What it does:
 
 If `spotlight_parser` is not found in `PATH`, it still builds the report and notes install instructions:
 - https://github.com/ydkhatri/spotlight_parser
+
+## Storage Safety
+
+The scanner now enforces a free-space reserve to avoid filling your system disk:
+- default reserve is `20 GiB`
+- customize with `--min-free-gb <N>`
+- scan aborts safely before heavy phases if free space drops below reserve
+
+Example:
+
+```bash
+sudo zsh scan_crypto_v5.sh --min-free-gb 30
+```
 
 ## Fast Mode
 
