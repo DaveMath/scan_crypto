@@ -1,6 +1,6 @@
 # scan_cyrpto
 
-Current script version: `v5.6.1`
+Current script version: `v5.7.0`
 
 `scan_crypto_v5.sh` is a powerful read-only crypto forensic triage utility for macOS.
 

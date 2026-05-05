@@ -40,7 +40,7 @@
 set -uo pipefail
 export LC_ALL=C
 export LANG=C
-SCRIPT_VERSION="v5.6.1"
+SCRIPT_VERSION="v5.7.0"
 
 SHOW_ALL_JPG=0
 AUTO_EJECT_OVERRIDE=""
@@ -479,12 +479,23 @@ fs_scan() {
   fi
 
   local current=0
+  local fs_start_ts
+  fs_start_ts=$(date +%s)
   for f in "${files[@]}"; do
     (( current++ ))
     local filled=$(( BAR_WIDTH * current / total ))
     local empty=$(( BAR_WIDTH - filled ))
     local bar="${(r:$filled::#:):-}${(r:$empty::-:):-}"
-    printf "\r  [fs] %s [%s] %d/%d files " "$label" "$bar" "$current" "$total" > /dev/tty
+    local now elapsed rate remaining eta
+    now=$(date +%s)
+    elapsed=$(( now - fs_start_ts ))
+    (( elapsed < 1 )) && elapsed=1
+    rate=$(( current / elapsed ))
+    (( rate < 1 )) && rate=1
+    remaining=$(( (total - current) / rate ))
+    eta=$(( now + remaining ))
+    printf "\r  [fs] %s [%s] %d/%d files | eta ~ %s " \
+      "$label" "$bar" "$current" "$total" "$(date -r "$eta" +%H:%M:%S)" > /dev/tty
 
     local reason=""
     if LC_ALL=C grep -qiE "$RE_ALL" "$f" 2>/dev/null; then
@@ -581,6 +592,8 @@ scan_partition() {
   local raw_high=0 raw_low=0 bip_valid=0 bip_candidate=0 fs_count=0 ext_count=0
 
   local phase_total=4
+  local part_start_ts
+  part_start_ts=$(date +%s)
   printf "=== %s ===\n" "$part" | tee -a "$SUMMARY"
   phase_progress "scan" 0 "$phase_total"
 
@@ -602,7 +615,7 @@ scan_partition() {
 
   if [[ -n "$SRC" ]]; then
     ensure_min_free_or_exit "$OUTDIR" "pre-raw-scan"
-    phase_progress "scan" 1 "$phase_total"
+    phase_progress "raw" 1 "$phase_total"
     local size
     size=$(partition_size_bytes "$part")
     [[ -z "$size" ]] && size=0
@@ -648,7 +661,7 @@ scan_partition() {
     if [[ "$raw_high" -gt 0 ]]; then
       echo "  [raw] HIGH first 60:" | tee -a "$SUMMARY"
       head -60 "$HIGH_TXT" | sed 's/^/    /' | tee -a "$SUMMARY"
-      echo "  [raw] offsets: $ALL_HITS" | tee -a "$SUMMARY"
+      echo "  [raw] detailed hit offsets and matched lines saved to: $ALL_HITS" | tee -a "$SUMMARY"
     fi
 
     if [[ "$raw_low" -gt 0 ]]; then
@@ -680,9 +693,9 @@ scan_partition() {
   fi
 
   if [[ "$FAST_MODE" -eq 1 ]]; then
-    printf "  [fs] skipped (--fast mode)\n" | tee -a "$SUMMARY"
+    printf "  [fs] skipped in --fast mode (raw triage only; no mounted-file content walk)\n" | tee -a "$SUMMARY"
   elif [[ "$RUN_FS_SCAN" -eq 1 && "$run_deep_for_part" -eq 1 && -n "$mount_point" && -d "$mount_point" ]]; then
-    phase_progress "scan" 2 "$phase_total"
+    phase_progress "fs" 2 "$phase_total"
     printf "  [fs] %s\n" "$mount_point" | tee -a "$SUMMARY"
     fs_count=$(fs_scan "$mount_point" "$FS_TXT" "$part")
 
@@ -692,7 +705,7 @@ scan_partition() {
     fi
 
     if [[ "$RUN_EXT_SCAN" -eq 1 ]]; then
-      phase_progress "scan" 3 "$phase_total"
+      phase_progress "ext" 3 "$phase_total"
       ext_count=$(ext_scan "$mount_point" "$EXT_TXT")
       if [[ "$ext_count" -gt 0 ]]; then
         echo "  [fs] interesting filenames: $ext_count" | tee -a "$SUMMARY"
@@ -720,8 +733,8 @@ scan_partition() {
   if [[ "$RUN_FOREMOST_ON_STRONG_HITS" -eq 1 && "$strong_total" -gt 0 && -n "$SRC" ]] \
       && command -v foremost >/dev/null 2>&1; then
     ensure_min_free_or_exit "$OUTDIR" "pre-foremost-carving"
-    phase_progress "scan" 4 "$phase_total"
-    printf "  [foremost] strong hits found, carving %s\n" "$part" | tee -a "$SUMMARY"
+    phase_progress "carve" 4 "$phase_total"
+    printf "  [foremost] strong raw indicators found on %s; running targeted file carving to recover embedded artifacts\n" "$part" | tee -a "$SUMMARY"
 
     local FMOUT="$OUTDIR/foremost_${part}"
     rm -rf "$FMOUT"
@@ -743,7 +756,10 @@ scan_partition() {
     printf "  No crypto hits.\n" | tee -a "$SUMMARY"
   fi
 
-  printf "\n" | tee -a "$SUMMARY"
+  local part_end_ts part_elapsed
+  part_end_ts=$(date +%s)
+  part_elapsed=$(( part_end_ts - part_start_ts ))
+  printf "  [time] partition %s elapsed: %ss\n\n" "$part" "$part_elapsed" | tee -a "$SUMMARY"
 }
 
 # ── Main ─────────────────────────────────────────────────────────────────────
