@@ -2,7 +2,7 @@
 
 Current script version: `v6.1.0`
 
-`scan_crypto_v5.sh` is a powerful read-only crypto forensic triage utility for macOS.
+`scan_crypto.sh` is a powerful read-only crypto forensic triage utility for macOS.
 
 It is built to quickly scan removable media for crypto-related evidence at scale, including:
 - wallet and keystore indicators
@@ -29,7 +29,7 @@ This lets you rapidly focus attention on the media most likely to contain releva
 ## Usage
 
 ```bash
-sudo zsh scan_crypto_v5.sh
+sudo zsh scan_crypto.sh
 ```
 
 Python requirement:
@@ -43,13 +43,13 @@ python3 -m pip install mnemonic
 Optional modes:
 
 ```bash
-sudo zsh scan_crypto_v5.sh --all-jpg
-sudo zsh scan_crypto_v5.sh --fast
-sudo zsh scan_crypto_v5.sh --deep
-sudo zsh scan_crypto_v5.sh --no-auto-eject
-sudo zsh scan_crypto_v5.sh --outdir ~/Documents/crypto_scan
-sudo zsh scan_crypto_v5.sh --min-free-gb 30
-sudo zsh scan_crypto_v5.sh --version
+sudo zsh scan_crypto.sh --all-jpg
+sudo zsh scan_crypto.sh --fast
+sudo zsh scan_crypto.sh --deep
+sudo zsh scan_crypto.sh --no-auto-eject
+sudo zsh scan_crypto.sh --outdir ~/Documents/crypto_scan
+sudo zsh scan_crypto.sh --min-free-gb 30
+sudo zsh scan_crypto.sh --version
 ```
 
 Recovered-image OCR triage (local):
@@ -120,7 +120,7 @@ The scanner now enforces a free-space reserve to avoid filling your system disk:
 Example:
 
 ```bash
-sudo zsh scan_crypto_v5.sh --min-free-gb 30
+sudo zsh scan_crypto.sh --min-free-gb 30
 ```
 
 ## Fast Mode
@@ -133,5 +133,5 @@ Use `--fast` for the quickest triage path:
 Example:
 
 ```bash
-sudo zsh scan_crypto_v5.sh --fast
+sudo zsh scan_crypto.sh --fast
 ```

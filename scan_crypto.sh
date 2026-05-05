@@ -20,13 +20,13 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
-# scan_crypto_v5.sh
+# scan_crypto.sh
 # Read-only crypto forensic triage for USB drives and SD cards.
 # No disk image copy.
 # Single-file script.
 #
 # Run:
-#   sudo zsh scan_crypto_v5.sh
+#   sudo zsh scan_crypto.sh
 #
 # Optional helpers:
 #   brew install pv foremost
@@ -64,7 +64,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --version)
-      echo "scan_crypto_v5.sh ${SCRIPT_VERSION}"
+      echo "scan_crypto.sh ${SCRIPT_VERSION}"
       exit 0
       ;;
     --deep)
