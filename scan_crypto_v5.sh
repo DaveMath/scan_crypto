@@ -40,7 +40,7 @@
 set -uo pipefail
 export LC_ALL=C
 export LANG=C
-SCRIPT_VERSION="v6.0.3"
+SCRIPT_VERSION="v6.1.0"
 
 SHOW_ALL_JPG=0
 AUTO_EJECT_OVERRIDE=""
@@ -49,6 +49,9 @@ OUTDIR=""
 FORCE_DEEP_SCAN=0
 FAST_MODE=0
 MIN_FREE_GB=20
+PROFILE="strict"
+EXTRA_EXCLUDE=""
+SHOW_FILTERED=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -88,9 +91,29 @@ while [[ $# -gt 0 ]]; do
       MIN_FREE_GB="$2"
       shift 2
       ;;
+    --profile)
+      if [[ $# -lt 2 ]]; then
+        echo "Missing value for --profile" >&2
+        exit 1
+      fi
+      PROFILE="$2"
+      shift 2
+      ;;
+    --extra-exclude)
+      if [[ $# -lt 2 ]]; then
+        echo "Missing value for --extra-exclude" >&2
+        exit 1
+      fi
+      EXTRA_EXCLUDE="$2"
+      shift 2
+      ;;
+    --show-filtered)
+      SHOW_FILTERED=1
+      shift
+      ;;
     *)
       echo "Unknown argument: $1" >&2
-      echo "Usage: sudo zsh $0 [--all-jpg] [--fast] [--deep] [--no-auto-eject] [--outdir <path>] [--min-free-gb <N>] [--version]" >&2
+      echo "Usage: sudo zsh $0 [--all-jpg] [--fast] [--deep] [--profile strict|balanced|forensic_raw] [--extra-exclude <regex>] [--show-filtered] [--no-auto-eject] [--outdir <path>] [--min-free-gb <N>] [--version]" >&2
       exit 1
       ;;
   esac
@@ -219,6 +242,38 @@ RE_FS_EXTRA='[0-9a-fA-F]{64}'
 RE_EXCLUDE='(uits|amazon|amzn|drm|widevine|playready|fairplay|signature|rsa2048|sha256|manifest|license|x-amz|etag|content-md5|audible|locker|transactiontype|distributor|download[ _-]*(paid|locker|queue)|spotlight|dbstr|dictionary|index|kmditemadditionalrecipientemailaddresses|kmditemhiddenadditionalrecipientemailaddresses|kmditemcontentcreationdateweekdayordinal|kmditemcontentmodificationdateweekofyear|kmditemcontentmodificationdateweekdayordinal|kmditemcontentmodificationdateweekofmonth|mditem|mdworker|mds_stores|store-v2)'
 RE_PATH_EXCLUDE='(/\\.Spotlight-V100/|/Library/Caches/|/Cache/|/logs?/|/log/|download[ _-]*queue|audible)'
 RE_WALLET_FILE='(wallet\\.dat|UTC--|\\.keystore$|\\.wallet$|\\.seed$|xprv|xpub|[yz]prv|[yz]pub)'
+
+apply_profile() {
+  case "$PROFILE" in
+    strict)
+      : ;;
+    balanced)
+      RE_EXCLUDE='(uits|amazon|amzn|drm|widevine|playready|fairplay|signature|rsa2048|sha256|manifest|license|x-amz|etag|content-md5|spotlight|mditem|mdworker|mds_stores|store-v2)'
+      ;;
+    forensic_raw)
+      RE_EXCLUDE='()'
+      RE_PATH_EXCLUDE='()'
+      ;;
+    *)
+      echo "Invalid --profile: $PROFILE (use strict|balanced|forensic_raw)" >&2
+      exit 1
+      ;;
+  esac
+
+  if [[ -n "$EXTRA_EXCLUDE" ]]; then
+    RE_EXCLUDE="${RE_EXCLUDE%)}|${EXTRA_EXCLUDE})"
+  fi
+}
+
+is_excluded_content() {
+  local f="$1"
+  LC_ALL=C grep -a -qiE "$RE_EXCLUDE" "$f" 2>/dev/null
+}
+
+is_excluded_path() {
+  local f="$1"
+  [[ "$f" =~ ${~RE_PATH_EXCLUDE} ]]
+}
 RE_JPG_NAME='(wallet|seed|mnemonic|recovery|restore|backup|private[ _.-]?key|secret|passphrase|keystore|metamask|ledger|trezor|electrum|exodus|phantom|coinbase|trust[ _.-]?wallet|crypto|bitcoin|ethereum|solana|doge|litecoin|monero)'
 
 INTERESTING_EXTS=(
@@ -474,6 +529,7 @@ fs_scan() {
   local label="$3"
   local BAR_WIDTH=40
   local fs_hits=0
+  local filtered_noise=0
 
   : > "$out_file"
 
@@ -499,11 +555,12 @@ fs_scan() {
       "$label" "$bar" "$current" "$total" "$pct" > /dev/tty
 
     local reason=""
-    if [[ "$f" =~ ${~RE_PATH_EXCLUDE} ]]; then
+    if is_excluded_path "$f"; then
+      (( filtered_noise++ ))
       continue
     fi
 
-    if LC_ALL=C grep -a -qiE "$RE_ALL" "$f" 2>/dev/null && ! LC_ALL=C grep -a -qiE "$RE_EXCLUDE" "$f" 2>/dev/null; then
+    if LC_ALL=C grep -a -qiE "$RE_ALL" "$f" 2>/dev/null && ! is_excluded_content "$f"; then
       reason="fs-crypto"
     elif LC_ALL=C grep -qE "$RE_FS_EXTRA" "$f" 2>/dev/null; then
       reason="fs-hex64"
@@ -523,6 +580,7 @@ fs_scan() {
   done
 
   printf "\n  [fs] %s: %d scanned, %d hit(s)\n" "$label" "$total" "$fs_hits" > /dev/tty
+  [[ "$SHOW_FILTERED" -eq 1 ]] && printf "  [fs] %s: %d filtered noise file(s)\n" "$label" "$filtered_noise" > /dev/tty
   echo "$fs_hits"
 }
 
@@ -820,6 +878,8 @@ scan_partition() {
 }
 
 # ── Main ─────────────────────────────────────────────────────────────────────
+apply_profile
+printf "Profile: %s\n\n" "$PROFILE" | /usr/bin/tee -a "$SUMMARY"
 DISKS=("${(@f)$(discover_target_partitions)}")
 # Defensive sanitize: only keep disk identifiers like disk10s1.
 DISKS=("${(@f)$(printf '%s\n' "${DISKS[@]}" | LC_ALL=C grep -E '^disk[0-9]+s[0-9]+$' || true)}")
