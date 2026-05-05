@@ -40,7 +40,7 @@
 set -uo pipefail
 export LC_ALL=C
 export LANG=C
-SCRIPT_VERSION="v6.0.2"
+SCRIPT_VERSION="v6.0.3"
 
 SHOW_ALL_JPG=0
 AUTO_EJECT_OVERRIDE=""
@@ -216,7 +216,7 @@ RE_HIGH="${(j:|:)PAT_HIGH}"
 RE_LOW="${(j:|:)PAT_LOW}"
 RE_ALL="${RE_HIGH}|${RE_LOW}"
 RE_FS_EXTRA='[0-9a-fA-F]{64}'
-RE_EXCLUDE='(uits|amazon|amzn|drm|widevine|playready|fairplay|signature|rsa2048|sha256|manifest|license|x-amz|etag|content-md5|audible|locker|transactiontype|distributor|download[ _-]*(paid|locker|queue)|spotlight|dbstr|dictionary|index)'
+RE_EXCLUDE='(uits|amazon|amzn|drm|widevine|playready|fairplay|signature|rsa2048|sha256|manifest|license|x-amz|etag|content-md5|audible|locker|transactiontype|distributor|download[ _-]*(paid|locker|queue)|spotlight|dbstr|dictionary|index|kmditemadditionalrecipientemailaddresses|kmditemhiddenadditionalrecipientemailaddresses|kmditemcontentcreationdateweekdayordinal|kmditemcontentmodificationdateweekofyear|kmditemcontentmodificationdateweekdayordinal|kmditemcontentmodificationdateweekofmonth|mditem|mdworker|mds_stores|store-v2)'
 RE_PATH_EXCLUDE='(/\\.Spotlight-V100/|/Library/Caches/|/Cache/|/logs?/|/log/|download[ _-]*queue|audible)'
 RE_WALLET_FILE='(wallet\\.dat|UTC--|\\.keystore$|\\.wallet$|\\.seed$|xprv|xpub|[yz]prv|[yz]pub)'
 RE_JPG_NAME='(wallet|seed|mnemonic|recovery|restore|backup|private[ _.-]?key|secret|passphrase|keystore|metamask|ledger|trezor|electrum|exodus|phantom|coinbase|trust[ _.-]?wallet|crypto|bitcoin|ethereum|solana|doge|litecoin|monero)'
