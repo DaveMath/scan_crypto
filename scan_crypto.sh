@@ -40,7 +40,7 @@
 set -uo pipefail
 export LC_ALL=C
 export LANG=C
-SCRIPT_VERSION="v6.3.2"
+SCRIPT_VERSION="v6.3.3"
 
 SHOW_ALL_JPG=0
 AUTO_EJECT_OVERRIDE=""
@@ -715,6 +715,18 @@ append_manifest() {
     "$(/bin/date +%Y-%m-%dT%H:%M:%S)" "$parent" "$part" "$serial" "$disk_uuid" "$media_uuid" "$src" "$offset" "$reason" "$classification" "$copied" >> "$MANIFEST"
 }
 
+emit_interesting_callout() {
+  local part="$1"
+  local classification="$2"
+  local reason="$3"
+  {
+    echo "**************************************************"
+    echo "***** INTERESTING ARTIFACT FOUND: ${classification} *****"
+    echo "***** /dev/${part} | ${reason} *****"
+    echo "**************************************************"
+  } | /usr/bin/tee -a "$SUMMARY"
+}
+
 copy_evidence_for_part() {
   local parent="$1"
   local part="$2"
@@ -999,6 +1011,7 @@ scan_partition() {
 
   if [[ "$decision" == "keep" ]]; then
     PARENT_HAS_HITS[$parent]=1
+    emit_interesting_callout "$part" "$confidence" "evidence captured locally; see evidence_manifest.csv"
     copy_evidence_for_part "$parent" "$part" "$confidence" "$SRC" "$ALL_HITS" "$FS_TXT" "$EXT_TXT"
     echo "$parent,$part,$raw_high,$raw_low,$bip_valid,$bip_candidate,$fs_count,$ext_count,keep" >> "$CSV"
     printf "  [decision] keep (%s) - evidence copied locally\n" "$confidence" | /usr/bin/tee -a "$SUMMARY"
