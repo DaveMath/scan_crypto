@@ -40,7 +40,7 @@
 set -uo pipefail
 export LC_ALL=C
 export LANG=C
-SCRIPT_VERSION="v6.1.2"
+SCRIPT_VERSION="v6.2.0"
 
 SHOW_ALL_JPG=0
 AUTO_EJECT_OVERRIDE=""
@@ -52,6 +52,9 @@ MIN_FREE_GB=20
 PROFILE="strict"
 EXTRA_EXCLUDE=""
 SHOW_FILTERED=0
+MODE="triage"
+BIP39_LANGS="english"
+ENABLE_HEX64=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -111,9 +114,21 @@ while [[ $# -gt 0 ]]; do
       SHOW_FILTERED=1
       shift
       ;;
+    --mode)
+      MODE="$2"
+      shift 2
+      ;;
+    --bip39-langs)
+      BIP39_LANGS="$2"
+      shift 2
+      ;;
+    --enable-hex64)
+      ENABLE_HEX64=1
+      shift
+      ;;
     *)
       echo "Unknown argument: $1" >&2
-      echo "Usage: sudo zsh $0 [--all-jpg] [--fast] [--deep] [--profile strict|balanced|forensic_raw] [--extra-exclude <regex>] [--show-filtered] [--no-auto-eject] [--outdir <path>] [--min-free-gb <N>] [--version]" >&2
+      echo "Usage: sudo zsh $0 [--all-jpg] [--fast] [--deep] [--mode triage|forensic] [--bip39-langs <csv>] [--enable-hex64] [--profile strict|balanced|forensic_raw] [--extra-exclude <regex>] [--show-filtered] [--no-auto-eject] [--outdir <path>] [--min-free-gb <N>] [--version]" >&2
       exit 1
       ;;
   esac
@@ -242,6 +257,7 @@ RE_FS_EXTRA='[0-9a-fA-F]{64}'
 RE_EXCLUDE='(uits|amazon|amzn|drm|widevine|playready|fairplay|signature|rsa2048|sha256|manifest|license|x-amz|etag|content-md5|audible|locker|transactiontype|distributor|download[ _-]*(paid|locker|queue)|spotlight|dbstr|dictionary|index|kmditemadditionalrecipientemailaddresses|kmditemhiddenadditionalrecipientemailaddresses|kmditemcontentcreationdateweekdayordinal|kmditemcontentmodificationdateweekofyear|kmditemcontentmodificationdateweekdayordinal|kmditemcontentmodificationdateweekofmonth|mditem|mdworker|mds_stores|store-v2|/9j/4aaqskzjrg|x:xmpmeta|adobe xmp core|adobe photoshop cs3|dc:format=\"image/jpeg\"|xmp\\.iid:|uuid:[0-9a-f]{24,}|pubmed|fda\\.gov|acr\\.org)'
 RE_PATH_EXCLUDE='(/\\.Spotlight-V100/|/Library/Caches/|/Cache/|/logs?/|/log/|download[ _-]*queue|audible)'
 RE_WALLET_FILE='(wallet\\.dat|UTC--|\\.keystore$|\\.wallet$|\\.seed$|xprv|xpub|[yz]prv|[yz]pub)'
+RE_WALLET_LAYOUT='(electrum|exodus|wasabi|bitcoin[ _-]?core|wallets?/|chainstate|blocks|\\.bitcoin|Local Extension Settings|IndexedDB|chrome-extension|moz-extension|metamask)'
 
 apply_profile() {
   case "$PROFILE" in
@@ -454,19 +470,32 @@ phase_progress() {
 bip39_stream_scan() {
   local valid_file="$1"
   local cand_file="$2"
+  local langs="$3"
 
-  python3 - "$valid_file" "$cand_file" <<'PY'
+  python3 - "$valid_file" "$cand_file" "$langs" <<'PY'
 import sys, re
 
 valid_file = sys.argv[1]
 cand_file = sys.argv[2]
+langs = [x.strip() for x in sys.argv[3].split(",") if x.strip()]
+if not langs:
+    langs = ["english"]
 phrase_lengths = (12, 15, 18, 21, 24)
 token_re = re.compile(r"[a-zA-Z]{3,8}")
 
 try:
     from mnemonic import Mnemonic
-    mnemo = Mnemonic("english")
-    wordset = set(mnemo.wordlist)
+    mnemolist = []
+    wordset = set()
+    for lang in langs:
+        try:
+            m = Mnemonic(lang)
+            mnemolist.append(m)
+            wordset.update(m.wordlist)
+        except Exception:
+            pass
+    if not mnemolist:
+        raise RuntimeError("No valid mnemonic languages loaded")
 except Exception:
     open(valid_file, "w").close()
     open(cand_file, "w").close()
@@ -491,7 +520,7 @@ def check_buffer():
                 phrase = " ".join(seq)
                 candidate_hits.add(phrase)
                 try:
-                    if mnemo.check(phrase):
+                    if any(m.check(phrase) for m in mnemolist):
                         valid_hits.add(phrase)
                 except Exception:
                     pass
@@ -562,7 +591,7 @@ fs_scan() {
 
     if LC_ALL=C grep -a -qiE "$RE_ALL" "$f" 2>/dev/null && ! is_excluded_content "$f"; then
       reason="fs-crypto"
-    elif LC_ALL=C grep -qE "$RE_FS_EXTRA" "$f" 2>/dev/null; then
+    elif [[ "$ENABLE_HEX64" -eq 1 ]] && LC_ALL=C grep -qE "$RE_FS_EXTRA" "$f" 2>/dev/null; then
       reason="fs-hex64"
     fi
 
@@ -758,7 +787,7 @@ scan_partition() {
       | LC_ALL=C sort -u > "$LOW_TXT" || true
 
     LC_ALL=C cut -d' ' -f2- "$RAW_TMP" \
-      | bip39_stream_scan "$VALID_BIP" "$CAND_BIP"
+      | bip39_stream_scan "$VALID_BIP" "$CAND_BIP" "$BIP39_LANGS"
 
     rm -f "$RAW_TMP"
 
@@ -801,6 +830,10 @@ scan_partition() {
   local raw_signal_total=$(( raw_high + raw_low + bip_valid + bip_candidate ))
   local run_deep_for_part=0
   if [[ "$FORCE_DEEP_SCAN" -eq 1 || "$raw_signal_total" -gt 0 ]]; then
+    run_deep_for_part=1
+  fi
+
+  if [[ "$MODE" == "forensic" ]]; then
     run_deep_for_part=1
   fi
 
@@ -860,20 +893,29 @@ scan_partition() {
   fi
 
   local total=$(( raw_high + raw_low + bip_valid + bip_candidate + fs_count + ext_count ))
-  local confidence="LOW_CONFIDENCE"
+  local confidence="likely noise"
   local decision="no_hits"
   local wallet_file_hits=0
+  local layout_hits=0
+  local proof_like=0
 
   wallet_file_hits=$(( \
     $(LC_ALL=C grep -a -iE -c "$RE_WALLET_FILE" "$EXT_TXT" 2>/dev/null || true) + \
     $(LC_ALL=C grep -a -iE -c "$RE_WALLET_FILE" "$HIGH_TXT" 2>/dev/null || true) \
   ))
+  layout_hits=$(LC_ALL=C grep -a -iE -c "$RE_WALLET_LAYOUT" "$EXT_TXT" 2>/dev/null || true)
+  if [[ "$ENABLE_HEX64" -eq 1 ]]; then
+    proof_like=$(LC_ALL=C grep -a -iE -c "$RE_FS_EXTRA" "$HIGH_TXT" 2>/dev/null || true)
+  fi
 
-  if [[ "$raw_high" -gt 0 && ( "$bip_valid" -gt 0 || "$wallet_file_hits" -gt 0 ) ]]; then
-    confidence="HIGH_CONFIDENCE"
+  if [[ "$bip_valid" -gt 0 && "$wallet_file_hits" -gt 0 ]]; then
+    confidence="proof-like"
     decision="keep"
-  elif [[ "$total" -gt 0 ]]; then
-    confidence="LIKELY_MEDIA_METADATA"
+  elif [[ "$raw_high" -gt 0 && ( "$wallet_file_hits" -gt 0 || "$layout_hits" -gt 0 || "$proof_like" -gt 0 ) ]]; then
+    confidence="strong artifact"
+    decision="keep"
+  elif [[ "$raw_low" -gt 0 || "$bip_candidate" -gt 0 || "$ext_count" -gt 0 ]]; then
+    confidence="weak keyword"
     decision="review_low"
   fi
 
