@@ -207,7 +207,7 @@ EVIDENCE_DIR="$OUTDIR/evidence"
 MANIFEST="$OUTDIR/evidence_manifest.csv"
 mkdir -p "$IMAGE_HITS_DIR"
 mkdir -p "$EVIDENCE_DIR"
-echo "timestamp,parent,partition,source_path_or_device,offset_hex,reason,classification,copied_to" > "$MANIFEST"
+echo "timestamp,parent,partition,device_serial,disk_uuid,media_uuid,source_path_or_device,offset_hex,reason,classification,copied_to" > "$MANIFEST"
 
 PAT_HIGH=(
   'bc1[a-zA-HJ-NP-Z0-9]{25,90}'
@@ -699,8 +699,20 @@ append_manifest() {
   local reason="$5"
   local classification="$6"
   local copied="$7"
-  printf "%s,%s,%s,%s,%s,%s,%s,%s\n" \
-    "$(/bin/date +%Y-%m-%dT%H:%M:%S)" "$parent" "$part" "$src" "$offset" "$reason" "$classification" "$copied" >> "$MANIFEST"
+  local serial=""
+  local disk_uuid=""
+  local media_uuid=""
+  local dinfo
+  dinfo=$(/usr/sbin/diskutil info "/dev/$parent" 2>/dev/null || true)
+  serial=$(echo "$dinfo" | /usr/bin/awk -F: '/Disk \/ Media UUID:/ {gsub(/^[ \t]+/,"",$2); print $2; exit}')
+  disk_uuid=$(echo "$dinfo" | /usr/bin/awk -F: '/Disk \/ Partition UUID:/ {gsub(/^[ \t]+/,"",$2); print $2; exit}')
+  media_uuid=$(echo "$dinfo" | /usr/bin/awk -F: '/Volume UUID:/ {gsub(/^[ \t]+/,"",$2); print $2; exit}')
+  [[ -z "$serial" ]] && serial="unknown"
+  [[ -z "$disk_uuid" ]] && disk_uuid="unknown"
+  [[ -z "$media_uuid" ]] && media_uuid="unknown"
+
+  printf "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n" \
+    "$(/bin/date +%Y-%m-%dT%H:%M:%S)" "$parent" "$part" "$serial" "$disk_uuid" "$media_uuid" "$src" "$offset" "$reason" "$classification" "$copied" >> "$MANIFEST"
 }
 
 copy_evidence_for_part() {
