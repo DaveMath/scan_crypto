@@ -40,7 +40,7 @@
 set -uo pipefail
 export LC_ALL=C
 export LANG=C
-SCRIPT_VERSION="v6.0.1"
+SCRIPT_VERSION="v6.0.2"
 
 SHOW_ALL_JPG=0
 AUTO_EJECT_OVERRIDE=""
@@ -216,7 +216,9 @@ RE_HIGH="${(j:|:)PAT_HIGH}"
 RE_LOW="${(j:|:)PAT_LOW}"
 RE_ALL="${RE_HIGH}|${RE_LOW}"
 RE_FS_EXTRA='[0-9a-fA-F]{64}'
-RE_EXCLUDE='(uits|amazon|amzn|drm|widevine|playready|fairplay|signature|rsa2048|sha256|manifest|license|x-amz|etag|content-md5)'
+RE_EXCLUDE='(uits|amazon|amzn|drm|widevine|playready|fairplay|signature|rsa2048|sha256|manifest|license|x-amz|etag|content-md5|audible|locker|transactiontype|distributor|download[ _-]*(paid|locker|queue)|spotlight|dbstr|dictionary|index)'
+RE_PATH_EXCLUDE='(/\\.Spotlight-V100/|/Library/Caches/|/Cache/|/logs?/|/log/|download[ _-]*queue|audible)'
+RE_WALLET_FILE='(wallet\\.dat|UTC--|\\.keystore$|\\.wallet$|\\.seed$|xprv|xpub|[yz]prv|[yz]pub)'
 RE_JPG_NAME='(wallet|seed|mnemonic|recovery|restore|backup|private[ _.-]?key|secret|passphrase|keystore|metamask|ledger|trezor|electrum|exodus|phantom|coinbase|trust[ _.-]?wallet|crypto|bitcoin|ethereum|solana|doge|litecoin|monero)'
 
 INTERESTING_EXTS=(
@@ -497,6 +499,10 @@ fs_scan() {
       "$label" "$bar" "$current" "$total" "$pct" > /dev/tty
 
     local reason=""
+    if [[ "$f" =~ ${~RE_PATH_EXCLUDE} ]]; then
+      continue
+    fi
+
     if LC_ALL=C grep -a -qiE "$RE_ALL" "$f" 2>/dev/null && ! LC_ALL=C grep -a -qiE "$RE_EXCLUDE" "$f" 2>/dev/null; then
       reason="fs-crypto"
     elif LC_ALL=C grep -qE "$RE_FS_EXTRA" "$f" 2>/dev/null; then
@@ -782,10 +788,29 @@ scan_partition() {
   fi
 
   local total=$(( raw_high + raw_low + bip_valid + bip_candidate + fs_count + ext_count ))
+  local confidence="LOW_CONFIDENCE"
+  local decision="no_hits"
+  local wallet_file_hits=0
 
-  if [[ "$total" -gt 0 ]]; then
+  wallet_file_hits=$(( \
+    $(LC_ALL=C grep -a -iE -c "$RE_WALLET_FILE" "$EXT_TXT" 2>/dev/null || true) + \
+    $(LC_ALL=C grep -a -iE -c "$RE_WALLET_FILE" "$HIGH_TXT" 2>/dev/null || true) \
+  ))
+
+  if [[ "$raw_high" -gt 0 && ( "$bip_valid" -gt 0 || "$wallet_file_hits" -gt 0 ) ]]; then
+    confidence="HIGH_CONFIDENCE"
+    decision="keep"
+  elif [[ "$total" -gt 0 ]]; then
+    confidence="LIKELY_MEDIA_METADATA"
+    decision="review_low"
+  fi
+
+  if [[ "$decision" == "keep" ]]; then
     PARENT_HAS_HITS[$parent]=1
     echo "$parent,$part,$raw_high,$raw_low,$bip_valid,$bip_candidate,$fs_count,$ext_count,keep" >> "$CSV"
+  elif [[ "$decision" == "review_low" ]]; then
+    echo "$parent,$part,$raw_high,$raw_low,$bip_valid,$bip_candidate,$fs_count,$ext_count,review_low" >> "$CSV"
+    printf "  [decision] %s (%s)\n" "$decision" "$confidence" | /usr/bin/tee -a "$SUMMARY"
   else
     echo "$parent,$part,0,0,0,0,0,0,no_hits" >> "$CSV"
     printf "  No crypto hits.\n" | /usr/bin/tee -a "$SUMMARY"
