@@ -1,6 +1,6 @@
 # scan_cyrpto
 
-Current script version: `v5.3.0`
+Current script version: `v5.5.0`
 
 `scan_crypto_v5.sh` is a powerful read-only crypto forensic triage utility for macOS.
 
@@ -15,6 +15,7 @@ It is built to quickly scan removable media for crypto-related evidence at scale
 - Scans as many removable USB, thumb, and SD-style drives as you can plug into your system.
 - Automatically discovers eligible external partitions while skipping internal/system containers.
 - Performs a raw strings pass plus mounted filesystem triage for broad evidence coverage.
+- Includes a dedicated `--fast` mode for raw-only triage when speed is the priority.
 - Uses a confidence-oriented workflow to help surface high-priority partitions for review.
 
 ## Smart Keep-or-Eject Workflow
@@ -43,6 +44,8 @@ Optional modes:
 
 ```bash
 sudo zsh scan_crypto_v5.sh --all-jpg
+sudo zsh scan_crypto_v5.sh --fast
+sudo zsh scan_crypto_v5.sh --deep
 sudo zsh scan_crypto_v5.sh --no-auto-eject
 sudo zsh scan_crypto_v5.sh --outdir ~/Documents/crypto_scan
 sudo zsh scan_crypto_v5.sh --version
@@ -86,3 +89,16 @@ What it does:
 
 If `spotlight_parser` is not found in `PATH`, it still builds the report and notes install instructions:
 - https://github.com/ydkhatri/spotlight_parser
+
+## Fast Mode
+
+Use `--fast` for the quickest triage path:
+- runs raw scan + pattern extraction + BIP39 checks
+- keeps optional carving behavior on strong hits
+- skips mounted filesystem content scan and extension scan
+
+Example:
+
+```bash
+sudo zsh scan_crypto_v5.sh --fast
+```

@@ -40,11 +40,13 @@
 set -uo pipefail
 export LC_ALL=C
 export LANG=C
-SCRIPT_VERSION="v5.3.0"
+SCRIPT_VERSION="v5.5.0"
 
 SHOW_ALL_JPG=0
 AUTO_EJECT_OVERRIDE=""
 OUTDIR="$HOME/Documents/crypto_scan"
+FORCE_DEEP_SCAN=0
+FAST_MODE=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -60,6 +62,14 @@ while [[ $# -gt 0 ]]; do
       echo "scan_crypto_v5.sh ${SCRIPT_VERSION}"
       exit 0
       ;;
+    --deep)
+      FORCE_DEEP_SCAN=1
+      shift
+      ;;
+    --fast)
+      FAST_MODE=1
+      shift
+      ;;
     --outdir)
       if [[ $# -lt 2 ]]; then
         echo "Missing value for --outdir" >&2
@@ -70,7 +80,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     *)
       echo "Unknown argument: $1" >&2
-      echo "Usage: sudo zsh $0 [--all-jpg] [--no-auto-eject] [--outdir <path>] [--version]" >&2
+      echo "Usage: sudo zsh $0 [--all-jpg] [--fast] [--deep] [--no-auto-eject] [--outdir <path>] [--version]" >&2
       exit 1
       ;;
   esac
@@ -98,8 +108,13 @@ printf "Output directory: %s\n\n" "$OUTDIR" | tee -a "$SUMMARY"
 printf "Tip: use --outdir to store results elsewhere.\n\n" | tee -a "$SUMMARY"
 printf "Searching for: wallet files, crypto address/key patterns, BIP39 seed phrases, and interesting filenames (including JPG/JPEG).\n\n" | tee -a "$SUMMARY"
 printf "Status: initializing device discovery...\n\n" | tee -a "$SUMMARY"
+if [[ "$FAST_MODE" -eq 1 ]]; then
+  printf "Scan profile: FAST mode (raw-only triage + optional carving). Mounted filesystem and extension scans are skipped.\n\n" | tee -a "$SUMMARY"
+else
+  printf "Scan profile: speed-first (raw triage first; fs/ext scans run only when raw indicators exist). Use --deep to force full mounted-filesystem scanning.\n\n" | tee -a "$SUMMARY"
+fi
 
-BS=16m
+BS=64m
 MIN_STR=6
 
 AUTO_EJECT_NO_HITS=0
@@ -306,6 +321,21 @@ raw_stream_with_progress() {
     echo "  pv not installed, using dd status=progress" > /dev/tty
     dd if="$src" bs="$BS" iflag=fullblock status=progress 2>>"$LOG"
   fi
+}
+
+best_bs_for_source() {
+  local src="$1"
+  local test_file="$OUTDIR/.bs_probe.$$"
+  local bs
+  for bs in 64m 32m 16m; do
+    if dd if="$src" bs="$bs" count=1 of="$test_file" iflag=fullblock 2>>"$LOG"; then
+      rm -f "$test_file"
+      echo "$bs"
+      return
+    fi
+  done
+  rm -f "$test_file"
+  echo "16m"
 }
 
 phase_progress() {
@@ -538,6 +568,9 @@ scan_partition() {
     size=$(partition_size_bytes "$part")
     [[ -z "$size" ]] && size=0
 
+    local best_bs
+    best_bs=$(best_bs_for_source "$SRC")
+    BS="$best_bs"
     printf "  [raw] %s, bs=%s, size=%s bytes\n" "$SRC" "$BS" "$size" | tee -a "$SUMMARY"
 
     local RAW_TMP="$OUTDIR/${part}_raw_strings.tmp"
@@ -600,7 +633,15 @@ scan_partition() {
   mount_point=$(diskutil info "/dev/$part" 2>/dev/null \
     | awk '/Mount Point:/ {$1=$2=""; sub(/^[[:space:]]+/,""); print}') || true
 
-  if [[ "$RUN_FS_SCAN" -eq 1 && -n "$mount_point" && -d "$mount_point" ]]; then
+  local raw_signal_total=$(( raw_high + raw_low + bip_valid + bip_candidate ))
+  local run_deep_for_part=0
+  if [[ "$FORCE_DEEP_SCAN" -eq 1 || "$raw_signal_total" -gt 0 ]]; then
+    run_deep_for_part=1
+  fi
+
+  if [[ "$FAST_MODE" -eq 1 ]]; then
+    printf "  [fs] skipped (--fast mode)\n" | tee -a "$SUMMARY"
+  elif [[ "$RUN_FS_SCAN" -eq 1 && "$run_deep_for_part" -eq 1 && -n "$mount_point" && -d "$mount_point" ]]; then
     phase_progress "scan" 2 "$phase_total"
     printf "  [fs] %s\n" "$mount_point" | tee -a "$SUMMARY"
     fs_count=$(fs_scan "$mount_point" "$FS_TXT" "$part")
@@ -628,7 +669,11 @@ scan_partition() {
       fi
     fi
   else
-    printf "  [fs] not mounted or disabled\n" | tee -a "$SUMMARY"
+    if [[ "$run_deep_for_part" -eq 0 ]]; then
+      printf "  [fs] skipped (no raw indicators; speed-first mode)\n" | tee -a "$SUMMARY"
+    else
+      printf "  [fs] not mounted or disabled\n" | tee -a "$SUMMARY"
+    fi
   fi
 
   local strong_total=$(( raw_high + bip_valid ))
