@@ -203,7 +203,11 @@ RUN_FS_SCAN=1
 RUN_EXT_SCAN=1
 [[ -n "$AUTO_EJECT_OVERRIDE" ]] && AUTO_EJECT_NO_HITS="$AUTO_EJECT_OVERRIDE"
 IMAGE_HITS_DIR="$OUTDIR/image_hits"
+EVIDENCE_DIR="$OUTDIR/evidence"
+MANIFEST="$OUTDIR/evidence_manifest.csv"
 mkdir -p "$IMAGE_HITS_DIR"
+mkdir -p "$EVIDENCE_DIR"
+echo "timestamp,parent,partition,source_path_or_device,offset_hex,reason,classification,copied_to" > "$MANIFEST"
 
 PAT_HIGH=(
   'bc1[a-zA-HJ-NP-Z0-9]{25,90}'
@@ -687,6 +691,68 @@ triage_recovered_images() {
   echo "  [img] OCR triage complete: ${hit_count} image hit(s) copied to $IMAGE_HITS_DIR" | /usr/bin/tee -a "$SUMMARY"
 }
 
+append_manifest() {
+  local parent="$1"
+  local part="$2"
+  local src="$3"
+  local offset="$4"
+  local reason="$5"
+  local classification="$6"
+  local copied="$7"
+  printf "%s,%s,%s,%s,%s,%s,%s,%s\n" \
+    "$(/bin/date +%Y-%m-%dT%H:%M:%S)" "$parent" "$part" "$src" "$offset" "$reason" "$classification" "$copied" >> "$MANIFEST"
+}
+
+copy_evidence_for_part() {
+  local parent="$1"
+  local part="$2"
+  local classification="$3"
+  local srcdev="$4"
+  local all_hits_file="$5"
+  local fs_hits_file="$6"
+  local ext_file="$7"
+  local out_part_dir="$EVIDENCE_DIR/$part"
+  mkdir -p "$out_part_dir"
+
+  # Copy concrete matched files when available.
+  if [[ -s "$fs_hits_file" ]]; then
+    while IFS=$'\t' read -r reason path; do
+      [[ -z "$path" || ! -f "$path" ]] && continue
+      local dest="$out_part_dir/$(/usr/bin/basename "$path")"
+      /bin/cp -f "$path" "$dest" 2>/dev/null || continue
+      append_manifest "$parent" "$part" "$path" "" "$reason" "$classification" "$dest"
+    done < "$fs_hits_file"
+  fi
+
+  # Copy strongly-named interesting files.
+  if [[ -s "$ext_file" ]]; then
+    while IFS= read -r path; do
+      [[ -z "$path" || ! -f "$path" ]] && continue
+      if LC_ALL=C echo "$path" | /usr/bin/grep -qiE "$RE_WALLET_FILE|$RE_WALLET_LAYOUT"; then
+        local dest="$out_part_dir/$(/usr/bin/basename "$path")"
+        /bin/cp -f "$path" "$dest" 2>/dev/null || continue
+        append_manifest "$parent" "$part" "$path" "" "filename/artifact match" "$classification" "$dest"
+      fi
+    done < "$ext_file"
+  fi
+
+  # Raw-only evidence: save bounded context windows around first strong offsets.
+  if [[ -s "$all_hits_file" ]]; then
+    local ctx="$out_part_dir/raw_context_windows.txt"
+    : > "$ctx"
+    /usr/bin/head -25 "$all_hits_file" | while IFS= read -r line; do
+      local offhex
+      offhex="$(echo "$line" | /usr/bin/awk '{print $1}')"
+      [[ -z "$offhex" ]] && continue
+      local offdec=$((16#$offhex))
+      local start=$(( offdec > 1024 ? offdec - 1024 : 0 ))
+      dd if="$srcdev" bs=1 skip="$start" count=2048 2>/dev/null | strings -a -n 4 >> "$ctx" || true
+      echo "---- offset=$offhex ----" >> "$ctx"
+      append_manifest "$parent" "$part" "$srcdev" "$offhex" "raw context window" "$classification" "$ctx"
+    done
+  fi
+}
+
 preview_targets() {
   local -a disks
   disks=("$@")
@@ -921,8 +987,11 @@ scan_partition() {
 
   if [[ "$decision" == "keep" ]]; then
     PARENT_HAS_HITS[$parent]=1
+    copy_evidence_for_part "$parent" "$part" "$confidence" "$SRC" "$ALL_HITS" "$FS_TXT" "$EXT_TXT"
     echo "$parent,$part,$raw_high,$raw_low,$bip_valid,$bip_candidate,$fs_count,$ext_count,keep" >> "$CSV"
+    printf "  [decision] keep (%s) - evidence copied locally\n" "$confidence" | /usr/bin/tee -a "$SUMMARY"
   elif [[ "$decision" == "review_low" ]]; then
+    PARENT_READY_EJECT[$parent]=0
     echo "$parent,$part,$raw_high,$raw_low,$bip_valid,$bip_candidate,$fs_count,$ext_count,review_low" >> "$CSV"
     printf "  [decision] %s (%s)\n" "$decision" "$confidence" | /usr/bin/tee -a "$SUMMARY"
   else
@@ -952,11 +1021,13 @@ preview_targets "${DISKS[@]}"
 
 typeset -A PARENT_HAS_HITS
 typeset -A PARENT_PARTS
+typeset -A PARENT_READY_EJECT
 
 for part in "${DISKS[@]}"; do
   parent=$(parent_of "$part")
   PARENT_PARTS[$parent]+=" $part"
   PARENT_HAS_HITS[$parent]=0
+  PARENT_READY_EJECT[$parent]=1
 done
 
 # Serial is deliberate. Parallel scans usually saturate shared USB/SD buses and get slower.
@@ -968,9 +1039,13 @@ done
 printf "=== Eject decision ===\n" | /usr/bin/tee -a "$SUMMARY"
 
 for parent in ${(k)PARENT_PARTS}; do
-  if [[ "${PARENT_HAS_HITS[$parent]}" -eq 1 ]]; then
-    printf "  KEEP  /dev/%s, hits found on:%s\n" "$parent" "${PARENT_PARTS[$parent]}" | /usr/bin/tee -a "$SUMMARY"
-    echo "$parent,ALL,-,-,-,-,-,-,kept_hits" >> "$CSV"
+  if [[ "${PARENT_HAS_HITS[$parent]}" -eq 1 && "${PARENT_READY_EJECT[$parent]}" -eq 1 ]]; then
+    printf "  DONE  /dev/%s, strong/proof artifacts captured locally from:%s\n" "$parent" "${PARENT_PARTS[$parent]}" | /usr/bin/tee -a "$SUMMARY"
+    /usr/sbin/diskutil eject "/dev/$parent" 2>&1 | /usr/bin/tee -a "$SUMMARY" || true
+    echo "$parent,ALL,-,-,-,-,-,-,ejected_done" >> "$CSV"
+  elif [[ "${PARENT_HAS_HITS[$parent]}" -eq 1 ]]; then
+    printf "  HOLD  /dev/%s, review required on:%s\n" "$parent" "${PARENT_PARTS[$parent]}" | /usr/bin/tee -a "$SUMMARY"
+    echo "$parent,ALL,-,-,-,-,-,-,held_review" >> "$CSV"
   else
     printf "  CLEAN /dev/%s, no hits on:%s\n" "$parent" "${PARENT_PARTS[$parent]}" | /usr/bin/tee -a "$SUMMARY"
 
