@@ -32,18 +32,19 @@
 #   brew install pv foremost
 #   python3 -m pip install mnemonic
 #
-# Output:
-#   /tmp/crypto_scan_v5/summary.txt
-#   /tmp/crypto_scan_v5/results.csv
-#   /tmp/crypto_scan_v5/run.log
+# Output (default):
+#   ~/Documents/crypto_scan/summary.txt
+#   ~/Documents/crypto_scan/results.csv
+#   ~/Documents/crypto_scan/run.log
 
 set -uo pipefail
 export LC_ALL=C
 export LANG=C
-SCRIPT_VERSION="v5.2.0"
+SCRIPT_VERSION="v5.3.0"
 
 SHOW_ALL_JPG=0
 AUTO_EJECT_OVERRIDE=""
+OUTDIR="$HOME/Documents/crypto_scan"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -59,9 +60,17 @@ while [[ $# -gt 0 ]]; do
       echo "scan_crypto_v5.sh ${SCRIPT_VERSION}"
       exit 0
       ;;
+    --outdir)
+      if [[ $# -lt 2 ]]; then
+        echo "Missing value for --outdir" >&2
+        exit 1
+      fi
+      OUTDIR="$2"
+      shift 2
+      ;;
     *)
       echo "Unknown argument: $1" >&2
-      echo "Usage: sudo zsh $0 [--all-jpg] [--no-auto-eject] [--version]" >&2
+      echo "Usage: sudo zsh $0 [--all-jpg] [--no-auto-eject] [--outdir <path>] [--version]" >&2
       exit 1
       ;;
   esac
@@ -72,7 +81,6 @@ if [[ $EUID -ne 0 ]]; then
   exit 1
 fi
 
-OUTDIR=/tmp/crypto_scan_v5
 mkdir -p "$OUTDIR"
 
 SUMMARY="$OUTDIR/summary.txt"
@@ -87,7 +95,9 @@ echo "parent,partition,raw_high,raw_low,bip39_valid,bip39_candidate,fs_hits,ext_
 printf "Scan started: %s\n" "$(date)" | tee -a "$SUMMARY"
 printf "Script version: %s\n" "$SCRIPT_VERSION" | tee -a "$SUMMARY"
 printf "Output directory: %s\n\n" "$OUTDIR" | tee -a "$SUMMARY"
+printf "Tip: use --outdir to store results elsewhere.\n\n" | tee -a "$SUMMARY"
 printf "Searching for: wallet files, crypto address/key patterns, BIP39 seed phrases, and interesting filenames (including JPG/JPEG).\n\n" | tee -a "$SUMMARY"
+printf "Status: initializing device discovery...\n\n" | tee -a "$SUMMARY"
 
 BS=16m
 MIN_STR=6
@@ -662,6 +672,7 @@ if [[ ${#DISKS[@]} -eq 0 ]]; then
 fi
 
 printf "Partitions selected: %s\n\n" "${DISKS[*]}" | tee -a "$SUMMARY"
+printf "Status: %d partition(s) queued for scan.\n\n" "${#DISKS[@]}" | tee -a "$SUMMARY"
 preview_targets "${DISKS[@]}"
 
 typeset -A PARENT_HAS_HITS
@@ -675,6 +686,7 @@ done
 
 # Serial is deliberate. Parallel scans usually saturate shared USB/SD buses and get slower.
 for part in "${DISKS[@]}"; do
+  printf "Status: scanning /dev/%s\n" "$part" | tee -a "$SUMMARY"
   scan_partition "$part"
 done
 

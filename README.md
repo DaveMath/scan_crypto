@@ -1,6 +1,6 @@
 # scan_cyrpto
 
-Current script version: `v5.2.0`
+Current script version: `v5.3.0`
 
 `scan_crypto_v5.sh` is a powerful read-only crypto forensic triage utility for macOS.
 
@@ -44,15 +44,16 @@ Optional modes:
 ```bash
 sudo zsh scan_crypto_v5.sh --all-jpg
 sudo zsh scan_crypto_v5.sh --no-auto-eject
+sudo zsh scan_crypto_v5.sh --outdir ~/Documents/crypto_scan
 sudo zsh scan_crypto_v5.sh --version
 ```
 
 ## Outputs
 
 By default, output is written to:
-- `/tmp/crypto_scan_v5/summary.txt`
-- `/tmp/crypto_scan_v5/results.csv`
-- `/tmp/crypto_scan_v5/run.log`
+- `~/Documents/crypto_scan/summary.txt`
+- `~/Documents/crypto_scan/results.csv`
+- `~/Documents/crypto_scan/run.log`
 
 Plus per-partition hit artifacts for deeper review.
 
@@ -61,3 +62,27 @@ Plus per-partition hit artifacts for deeper review.
 MIT
 
 Another DaveMathews.com creation - good luck finding your missing files on those old USB/Thumb/SD drives!
+
+## Parse tmp artifacts with spotlight_parser
+
+After a scan completes, run:
+
+```bash
+zsh parse_spotlight_tmp.sh
+```
+
+Optional custom output dir:
+
+```bash
+zsh parse_spotlight_tmp.sh ~/Documents/crypto_scan
+```
+
+What it does:
+- reads `~/Documents/crypto_scan/results.csv`
+- maps each partition back to its parent drive
+- explains why each drive is relevant (high-confidence hits, BIP39, fs hits, etc.)
+- runs `spotlight_parser` against per-partition artifacts when installed
+- pages the final report using `| more`
+
+If `spotlight_parser` is not found in `PATH`, it still builds the report and notes install instructions:
+- https://github.com/ydkhatri/spotlight_parser
