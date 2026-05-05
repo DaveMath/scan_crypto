@@ -33,9 +33,9 @@
 #   python3 -m pip install mnemonic
 #
 # Output (default):
-#   ~/Documents/crypto_scan/summary.txt
-#   ~/Documents/crypto_scan/results.csv
-#   ~/Documents/crypto_scan/run.log
+#   ~/Documents/scan_crypto/summary.txt
+#   ~/Documents/scan_crypto/results.csv
+#   ~/Documents/scan_crypto/run.log
 
 set -uo pipefail
 export LC_ALL=C
@@ -44,7 +44,7 @@ SCRIPT_VERSION="v6.1.1"
 
 SHOW_ALL_JPG=0
 AUTO_EJECT_OVERRIDE=""
-OUTDIR_ROOT="$HOME/Documents/crypto_scan"
+OUTDIR_ROOT="$HOME/Documents/scan_crypto"
 OUTDIR=""
 FORCE_DEEP_SCAN=0
 FAST_MODE=0

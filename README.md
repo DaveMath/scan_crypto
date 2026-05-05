@@ -47,7 +47,7 @@ sudo zsh scan_crypto.sh --all-jpg
 sudo zsh scan_crypto.sh --fast
 sudo zsh scan_crypto.sh --deep
 sudo zsh scan_crypto.sh --no-auto-eject
-sudo zsh scan_crypto.sh --outdir ~/Documents/crypto_scan
+sudo zsh scan_crypto.sh --outdir ~/Documents/scan_crypto
 sudo zsh scan_crypto.sh --min-free-gb 30
 sudo zsh scan_crypto.sh --version
 ```
@@ -62,9 +62,9 @@ Recovered-image OCR triage (local):
 ## Outputs
 
 By default, output is written to:
-- `~/Documents/crypto_scan/run_YYYYMMDD_HHMMSS/summary.txt`
-- `~/Documents/crypto_scan/run_YYYYMMDD_HHMMSS/results.csv`
-- `~/Documents/crypto_scan/run_YYYYMMDD_HHMMSS/run.log`
+- `~/Documents/scan_crypto/run_YYYYMMDD_HHMMSS/summary.txt`
+- `~/Documents/scan_crypto/run_YYYYMMDD_HHMMSS/results.csv`
+- `~/Documents/scan_crypto/run_YYYYMMDD_HHMMSS/run.log`
 
 Plus per-partition hit artifacts for deeper review.
 
@@ -74,7 +74,7 @@ Plus per-partition hit artifacts for deeper review.
 - The scanner reads from device nodes such as `/dev/disk*` or `/dev/rdisk*` and mounted target volumes.
 - The scanner does not write files to target media mount points such as `/Volumes/<target>`.
 - `parse_spotlight_tmp.sh` reads scan artifacts and runs parser logic on those artifacts only.
-- All generated files are written only to your configured `--outdir` (default: `~/Documents/crypto_scan`) on system storage.
+- All generated files are written only to your configured `--outdir` (default: `~/Documents/scan_crypto`) on system storage.
 
 Notes about macOS paths:
 - `/dev/*` entries are device nodes, not normal output file locations.
@@ -97,11 +97,11 @@ zsh parse_spotlight_tmp.sh
 Optional custom output dir:
 
 ```bash
-zsh parse_spotlight_tmp.sh ~/Documents/crypto_scan
+zsh parse_spotlight_tmp.sh ~/Documents/scan_crypto
 ```
 
 What it does:
-- reads `~/Documents/crypto_scan/results.csv`
+- reads `~/Documents/scan_crypto/results.csv`
 - maps each partition back to its parent drive
 - explains why each drive is relevant (high-confidence hits, BIP39, fs hits, etc.)
 - runs `spotlight_parser` against per-partition artifacts when installed

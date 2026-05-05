@@ -4,7 +4,7 @@ set -euo pipefail
 # Parse tmp artifacts from scan_crypto_v5 and run spotlight_parser when available.
 # Output is paged via `more`.
 
-OUTDIR="${1:-$HOME/Documents/crypto_scan}"
+OUTDIR="${1:-$HOME/Documents/scan_crypto}"
 CSV="$OUTDIR/results.csv"
 REPORT="$OUTDIR/spotlight_parse_report.txt"
 
