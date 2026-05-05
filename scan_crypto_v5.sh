@@ -40,7 +40,7 @@
 set -uo pipefail
 export LC_ALL=C
 export LANG=C
-SCRIPT_VERSION="v5.7.0"
+SCRIPT_VERSION="v5.7.1"
 
 SHOW_ALL_JPG=0
 AUTO_EJECT_OVERRIDE=""
@@ -108,7 +108,7 @@ LOG="$OUTDIR/run.log"
 
 bytes_free_for_path() {
   local path="$1"
-  df -k "$path" 2>/dev/null | awk 'NR==2 {print $4 * 1024}'
+  df -k "$path" 2>/dev/null | /usr/bin/awk 'NR==2 {print $4 * 1024}'
 }
 
 ensure_min_free_or_exit() {
@@ -121,13 +121,13 @@ ensure_min_free_or_exit() {
   min_bytes=$(( MIN_FREE_GB * 1024 * 1024 * 1024 ))
 
   if [[ -z "$free_bytes" ]]; then
-    echo "Could not determine free space for $path during $phase." | tee -a "$SUMMARY"
+    echo "Could not determine free space for $path during $phase." | /usr/bin/tee -a "$SUMMARY"
     exit 1
   fi
 
   if (( free_bytes < min_bytes )); then
-    echo "ABORT: low disk space during $phase. Free=${free_bytes} bytes, required minimum=${min_bytes} bytes (${MIN_FREE_GB} GiB)." | tee -a "$SUMMARY"
-    echo "Use --outdir to another volume or lower reserve with --min-free-gb." | tee -a "$SUMMARY"
+    echo "ABORT: low disk space during $phase. Free=${free_bytes} bytes, required minimum=${min_bytes} bytes (${MIN_FREE_GB} GiB)." | /usr/bin/tee -a "$SUMMARY"
+    echo "Use --outdir to another volume or lower reserve with --min-free-gb." | /usr/bin/tee -a "$SUMMARY"
     exit 1
   fi
 }
@@ -137,17 +137,17 @@ ensure_min_free_or_exit() {
 
 echo "parent,partition,raw_high,raw_low,bip39_valid,bip39_candidate,fs_hits,ext_hits,action" > "$CSV"
 
-printf "Scan started: %s\n" "$(date)" | tee -a "$SUMMARY"
-printf "Script version: %s\n" "$SCRIPT_VERSION" | tee -a "$SUMMARY"
-printf "Output directory: %s\n\n" "$OUTDIR" | tee -a "$SUMMARY"
-printf "Storage safety reserve: %s GiB free minimum\n\n" "$MIN_FREE_GB" | tee -a "$SUMMARY"
-printf "Tip: use --outdir to store results elsewhere.\n\n" | tee -a "$SUMMARY"
-printf "Searching for: wallet files, crypto address/key patterns, BIP39 seed phrases, and interesting filenames (including JPG/JPEG).\n\n" | tee -a "$SUMMARY"
-printf "Status: initializing device discovery...\n\n" | tee -a "$SUMMARY"
+printf "Scan started: %s\n" "$(/usr/bin/date)" | /usr/bin/tee -a "$SUMMARY"
+printf "Script version: %s\n" "$SCRIPT_VERSION" | /usr/bin/tee -a "$SUMMARY"
+printf "Output directory: %s\n\n" "$OUTDIR" | /usr/bin/tee -a "$SUMMARY"
+printf "Storage safety reserve: %s GiB free minimum\n\n" "$MIN_FREE_GB" | /usr/bin/tee -a "$SUMMARY"
+printf "Tip: use --outdir to store results elsewhere.\n\n" | /usr/bin/tee -a "$SUMMARY"
+printf "Searching for: wallet files, crypto address/key patterns, BIP39 seed phrases, and interesting filenames (including JPG/JPEG).\n\n" | /usr/bin/tee -a "$SUMMARY"
+printf "Status: initializing device discovery...\n\n" | /usr/bin/tee -a "$SUMMARY"
 if [[ "$FAST_MODE" -eq 1 ]]; then
-  printf "Scan profile: FAST mode (raw-only triage + optional carving). Mounted filesystem and extension scans are skipped.\n\n" | tee -a "$SUMMARY"
+  printf "Scan profile: FAST mode (raw-only triage + optional carving). Mounted filesystem and extension scans are skipped.\n\n" | /usr/bin/tee -a "$SUMMARY"
 else
-  printf "Scan profile: speed-first (raw triage first; fs/ext scans run only when raw indicators exist). Use --deep to force full mounted-filesystem scanning.\n\n" | tee -a "$SUMMARY"
+  printf "Scan profile: speed-first (raw triage first; fs/ext scans run only when raw indicators exist). Use --deep to force full mounted-filesystem scanning.\n\n" | /usr/bin/tee -a "$SUMMARY"
 fi
 
 ensure_min_free_or_exit "$OUTDIR" "startup"
@@ -252,8 +252,8 @@ probe_read() {
 
 partition_size_bytes() {
   local part="$1"
-  diskutil info "/dev/$part" 2>/dev/null \
-    | awk '
+  /usr/sbin/diskutil info "/dev/$part" 2>/dev/null \
+    | /usr/bin/awk '
       /Disk Size:/ {
         for (i=1; i<=NF; i++) {
           if ($i ~ /^\([0-9,]+$/ || $i ~ /^[0-9,]+$/) {
@@ -268,10 +268,10 @@ is_system_or_container_partition() {
   local info="$1"
   local name type content mount
 
-  name=$(echo "$info" | awk -F: '/Volume Name:/ {$1=""; sub(/^[ \t]+/,""); print}')
-  type=$(echo "$info" | awk -F: '/Type \(Bundle\):/ {$1=""; sub(/^[ \t]+/,""); print}')
-  content=$(echo "$info" | awk -F: '/Partition Type:/ {$1=""; sub(/^[ \t]+/,""); print}')
-  mount=$(echo "$info" | awk -F: '/Mount Point:/ {$1=""; sub(/^[ \t]+/,""); print}')
+  name=$(echo "$info" | /usr/bin/awk -F: '/Volume Name:/ {$1=""; sub(/^[ \t]+/,""); print}')
+  type=$(echo "$info" | /usr/bin/awk -F: '/Type \(Bundle\):/ {$1=""; sub(/^[ \t]+/,""); print}')
+  content=$(echo "$info" | /usr/bin/awk -F: '/Partition Type:/ {$1=""; sub(/^[ \t]+/,""); print}')
+  mount=$(echo "$info" | /usr/bin/awk -F: '/Mount Point:/ {$1=""; sub(/^[ \t]+/,""); print}')
 
   case "${name:l}" in
     efi|preboot|recovery|vm|update|xarts|hardware) return 0 ;;
@@ -295,18 +295,18 @@ is_system_or_container_partition() {
 discover_target_partitions() {
   local -a parents partitions
 
-  for disk in ${(f)"$(diskutil list | awk '/^\/dev\/disk[0-9]+/ {gsub("/dev/", "", $1); print $1}')"}; do
+  for disk in ${(f)"$(/usr/sbin/diskutil list | /usr/bin/awk '/^\/dev\/disk[0-9]+/ {gsub("/dev/", "", $1); print $1}')"}; do
     local info internal removable ejectable virtual protocol device_location
 
-    info=$(diskutil info "/dev/$disk" 2>/dev/null)
+    info=$(/usr/sbin/diskutil info "/dev/$disk" 2>/dev/null)
     [[ -z "$info" ]] && continue
 
-    internal=$(echo "$info" | awk -F: '/Internal:/ {gsub(/^[ \t]+/,"",$2); print $2}')
-    removable=$(echo "$info" | awk -F: '/Removable Media:/ {gsub(/^[ \t]+/,"",$2); print $2}')
-    ejectable=$(echo "$info" | awk -F: '/Ejectable:/ {gsub(/^[ \t]+/,"",$2); print $2}')
-    virtual=$(echo "$info" | awk -F: '/Virtual:/ {gsub(/^[ \t]+/,"",$2); print $2}')
-    protocol=$(echo "$info" | awk -F: '/Protocol:/ {gsub(/^[ \t]+/,"",$2); print $2}')
-    device_location=$(echo "$info" | awk -F: '/Device Location:/ {gsub(/^[ \t]+/,"",$2); print $2}')
+    internal=$(echo "$info" | /usr/bin/awk -F: '/Internal:/ {gsub(/^[ \t]+/,"",$2); print $2}')
+    removable=$(echo "$info" | /usr/bin/awk -F: '/Removable Media:/ {gsub(/^[ \t]+/,"",$2); print $2}')
+    ejectable=$(echo "$info" | /usr/bin/awk -F: '/Ejectable:/ {gsub(/^[ \t]+/,"",$2); print $2}')
+    virtual=$(echo "$info" | /usr/bin/awk -F: '/Virtual:/ {gsub(/^[ \t]+/,"",$2); print $2}')
+    protocol=$(echo "$info" | /usr/bin/awk -F: '/Protocol:/ {gsub(/^[ \t]+/,"",$2); print $2}')
+    device_location=$(echo "$info" | /usr/bin/awk -F: '/Device Location:/ {gsub(/^[ \t]+/,"",$2); print $2}')
 
     # Hard skips: internal Mac storage, APFS synthesized containers, disk images.
     [[ "$internal" == "Yes" ]] && continue
@@ -331,7 +331,7 @@ discover_target_partitions() {
       [[ ! "$part" =~ ^${parent}s[0-9]+$ ]] && continue
 
       local pinfo
-      pinfo=$(diskutil info "/dev/$part" 2>/dev/null)
+      pinfo=$(/usr/sbin/diskutil info "/dev/$part" 2>/dev/null)
       [[ -z "$pinfo" ]] && continue
 
       if is_system_or_container_partition "$pinfo"; then
@@ -340,7 +340,7 @@ discover_target_partitions() {
       fi
 
       partitions+=("$part")
-    done < <(diskutil list "/dev/$parent" 2>/dev/null | awk '/disk[0-9]+s[0-9]+$/ {print $NF}')
+    done < <(/usr/sbin/diskutil list "/dev/$parent" 2>/dev/null | /usr/bin/awk '/disk[0-9]+s[0-9]+$/ {print $NF}')
   done
 
   print -l "${(@u)partitions}"
@@ -384,7 +384,7 @@ phase_progress() {
   local filled=$(( width * step / total ))
   local empty=$(( width - filled ))
   local bar="${(r:$filled::#:):-}${(r:$empty::-:):-}"
-  printf "  [%s] [%s] %d/%d\n" "$label" "$bar" "$step" "$total" | tee -a "$SUMMARY"
+  printf "  [%s] [%s] %d/%d\n" "$label" "$bar" "$step" "$total" | /usr/bin/tee -a "$SUMMARY"
 }
 
 bip39_stream_scan() {
@@ -480,14 +480,14 @@ fs_scan() {
 
   local current=0
   local fs_start_ts
-  fs_start_ts=$(date +%s)
+  fs_start_ts=$(/usr/bin/date +%s)
   for f in "${files[@]}"; do
     (( current++ ))
     local filled=$(( BAR_WIDTH * current / total ))
     local empty=$(( BAR_WIDTH - filled ))
     local bar="${(r:$filled::#:):-}${(r:$empty::-:):-}"
     local now elapsed rate remaining eta
-    now=$(date +%s)
+    now=$(/usr/bin/date +%s)
     elapsed=$(( now - fs_start_ts ))
     (( elapsed < 1 )) && elapsed=1
     rate=$(( current / elapsed ))
@@ -495,7 +495,7 @@ fs_scan() {
     remaining=$(( (total - current) / rate ))
     eta=$(( now + remaining ))
     printf "\r  [fs] %s [%s] %d/%d files | eta ~ %s " \
-      "$label" "$bar" "$current" "$total" "$(date -r "$eta" +%H:%M:%S)" > /dev/tty
+      "$label" "$bar" "$current" "$total" "$(/usr/bin/date -r "$eta" +%H:%M:%S)" > /dev/tty
 
     local reason=""
     if LC_ALL=C grep -qiE "$RE_ALL" "$f" 2>/dev/null; then
@@ -509,7 +509,7 @@ fs_scan() {
       printf "\n  \$\$ [%s] %s\n" "$reason" "$f" > /dev/tty
       printf "%s\t%s\n" "$reason" "$f" >> "$out_file"
       LC_ALL=C grep -iE "$RE_HIGH|$RE_FS_EXTRA" "$f" 2>/dev/null \
-        | head -3 \
+        | /usr/bin/head -3 \
         | while IFS= read -r line; do
             printf "     -> %s\n" "${line:0:120}" > /dev/tty
           done
@@ -540,9 +540,9 @@ interesting_jpg_scan() {
 
   : > "$out_file"
   find "$mount" -type f \( -iname '*.jpg' -o -iname '*.jpeg' \) -print 2>/dev/null \
-    | awk -F/ '{print $NF "\t" $0}' \
+    | /usr/bin/awk -F/ '{print $NF "\t" $0}' \
     | LC_ALL=C grep -iE "$RE_JPG_NAME" \
-    | awk -F'\t' '{print $2}' \
+    | /usr/bin/awk -F'\t' '{print $2}' \
     >> "$out_file" || true
   LC_ALL=C sort -u -o "$out_file" "$out_file" 2>/dev/null || true
   wc -l < "$out_file" | tr -d ' '
@@ -552,11 +552,11 @@ preview_targets() {
   local -a disks
   disks=("$@")
 
-  echo "Targets:" | tee -a "$SUMMARY"
+  echo "Targets:" | /usr/bin/tee -a "$SUMMARY"
   for part in "${disks[@]}"; do
-    echo "--- /dev/$part ---" | tee -a "$SUMMARY"
-    diskutil info "/dev/$part" 2>/dev/null \
-      | awk -F: '
+    echo "--- /dev/$part ---" | /usr/bin/tee -a "$SUMMARY"
+    /usr/sbin/diskutil info "/dev/$part" 2>/dev/null \
+      | /usr/bin/awk -F: '
           /Device Identifier/ ||
           /Device Node/ ||
           /Volume Name/ ||
@@ -567,8 +567,8 @@ preview_targets() {
           /Disk Size/ ||
           /Device Location/ {
             print "  "$0
-          }' | tee -a "$SUMMARY"
-    echo "" | tee -a "$SUMMARY"
+          }' | /usr/bin/tee -a "$SUMMARY"
+    echo "" | /usr/bin/tee -a "$SUMMARY"
   done
 }
 
@@ -593,8 +593,8 @@ scan_partition() {
 
   local phase_total=4
   local part_start_ts
-  part_start_ts=$(date +%s)
-  printf "=== %s ===\n" "$part" | tee -a "$SUMMARY"
+  part_start_ts=$(/usr/bin/date +%s)
+  printf "=== %s ===\n" "$part" | /usr/bin/tee -a "$SUMMARY"
   phase_progress "scan" 0 "$phase_total"
 
   local SRC=""
@@ -623,7 +623,7 @@ scan_partition() {
     local best_bs
     best_bs=$(best_bs_for_source "$SRC")
     BS="$best_bs"
-    printf "  [raw] %s, bs=%s, size=%s bytes\n" "$SRC" "$BS" "$size" | tee -a "$SUMMARY"
+    printf "  [raw] %s, bs=%s, size=%s bytes\n" "$SRC" "$BS" "$size" | /usr/bin/tee -a "$SUMMARY"
 
     local RAW_TMP="$OUTDIR/${part}_raw_strings.tmp"
     ensure_min_free_or_exit "$OUTDIR" "pre-raw-temp-create"
@@ -656,35 +656,35 @@ scan_partition() {
     bip_candidate=$(wc -l < "$CAND_BIP" | tr -d ' ')
 
     printf "\n  [raw] HIGH=%s LOW=%s BIP39_valid=%s BIP39_candidate=%s\n" \
-      "$raw_high" "$raw_low" "$bip_valid" "$bip_candidate" | tee -a "$SUMMARY"
+      "$raw_high" "$raw_low" "$bip_valid" "$bip_candidate" | /usr/bin/tee -a "$SUMMARY"
 
     if [[ "$raw_high" -gt 0 ]]; then
-      echo "  [raw] HIGH first 60:" | tee -a "$SUMMARY"
-      head -60 "$HIGH_TXT" | sed 's/^/    /' | tee -a "$SUMMARY"
-      echo "  [raw] detailed hit offsets and matched lines saved to: $ALL_HITS" | tee -a "$SUMMARY"
+      echo "  [raw] HIGH first 60:" | /usr/bin/tee -a "$SUMMARY"
+      head -60 "$HIGH_TXT" | /usr/bin/sed 's/^/    /' | /usr/bin/tee -a "$SUMMARY"
+      echo "  [raw] detailed hit offsets and matched lines saved to: $ALL_HITS" | /usr/bin/tee -a "$SUMMARY"
     fi
 
     if [[ "$raw_low" -gt 0 ]]; then
-      echo "  [raw] LOW first 25:" | tee -a "$SUMMARY"
-      head -25 "$LOW_TXT" | sed 's/^/    /' | tee -a "$SUMMARY"
+      echo "  [raw] LOW first 25:" | /usr/bin/tee -a "$SUMMARY"
+      head -25 "$LOW_TXT" | /usr/bin/sed 's/^/    /' | /usr/bin/tee -a "$SUMMARY"
     fi
 
     if [[ "$bip_valid" -gt 0 ]]; then
-      echo "  [bip39] VALID checksum phrases:" | tee -a "$SUMMARY"
-      head -40 "$VALID_BIP" | sed 's/^/    /' | tee -a "$SUMMARY"
+      echo "  [bip39] VALID checksum phrases:" | /usr/bin/tee -a "$SUMMARY"
+      head -40 "$VALID_BIP" | /usr/bin/sed 's/^/    /' | /usr/bin/tee -a "$SUMMARY"
     fi
 
     if [[ "$bip_candidate" -gt 0 ]]; then
-      echo "  [bip39] candidate phrases, checksum not valid:" | tee -a "$SUMMARY"
-      head -40 "$CAND_BIP" | sed 's/^/    /' | tee -a "$SUMMARY"
+      echo "  [bip39] candidate phrases, checksum not valid:" | /usr/bin/tee -a "$SUMMARY"
+      head -40 "$CAND_BIP" | /usr/bin/sed 's/^/    /' | /usr/bin/tee -a "$SUMMARY"
     fi
   else
-    printf "  [raw] skipped, no read access. Add Terminal to Full Disk Access.\n" | tee -a "$SUMMARY"
+    printf "  [raw] skipped, no read access. Add Terminal to Full Disk Access.\n" | /usr/bin/tee -a "$SUMMARY"
   fi
 
   local mount_point=""
-  mount_point=$(diskutil info "/dev/$part" 2>/dev/null \
-    | awk '/Mount Point:/ {$1=$2=""; sub(/^[[:space:]]+/,""); print}') || true
+  mount_point=$(/usr/sbin/diskutil info "/dev/$part" 2>/dev/null \
+    | /usr/bin/awk '/Mount Point:/ {$1=$2=""; sub(/^[[:space:]]+/,""); print}') || true
 
   local raw_signal_total=$(( raw_high + raw_low + bip_valid + bip_candidate ))
   local run_deep_for_part=0
@@ -693,39 +693,39 @@ scan_partition() {
   fi
 
   if [[ "$FAST_MODE" -eq 1 ]]; then
-    printf "  [fs] skipped in --fast mode (raw triage only; no mounted-file content walk)\n" | tee -a "$SUMMARY"
+    printf "  [fs] skipped in --fast mode (raw triage only; no mounted-file content walk)\n" | /usr/bin/tee -a "$SUMMARY"
   elif [[ "$RUN_FS_SCAN" -eq 1 && "$run_deep_for_part" -eq 1 && -n "$mount_point" && -d "$mount_point" ]]; then
     phase_progress "fs" 2 "$phase_total"
-    printf "  [fs] %s\n" "$mount_point" | tee -a "$SUMMARY"
+    printf "  [fs] %s\n" "$mount_point" | /usr/bin/tee -a "$SUMMARY"
     fs_count=$(fs_scan "$mount_point" "$FS_TXT" "$part")
 
     if [[ "$fs_count" -gt 0 ]]; then
-      echo "  [fs] matching files:" | tee -a "$SUMMARY"
-      sed 's/^/    /' "$FS_TXT" | tee -a "$SUMMARY"
+      echo "  [fs] matching files:" | /usr/bin/tee -a "$SUMMARY"
+      sed 's/^/    /' "$FS_TXT" | /usr/bin/tee -a "$SUMMARY"
     fi
 
     if [[ "$RUN_EXT_SCAN" -eq 1 ]]; then
       phase_progress "ext" 3 "$phase_total"
       ext_count=$(ext_scan "$mount_point" "$EXT_TXT")
       if [[ "$ext_count" -gt 0 ]]; then
-        echo "  [fs] interesting filenames: $ext_count" | tee -a "$SUMMARY"
-        head -80 "$EXT_TXT" | sed 's/^/    /' | tee -a "$SUMMARY"
+        echo "  [fs] interesting filenames: $ext_count" | /usr/bin/tee -a "$SUMMARY"
+        head -80 "$EXT_TXT" | /usr/bin/sed 's/^/    /' | /usr/bin/tee -a "$SUMMARY"
       fi
     fi
 
     if [[ "$SHOW_ALL_JPG" -eq 1 ]]; then
       local jpg_count=0
       jpg_count=$(interesting_jpg_scan "$mount_point" "$JPG_TXT")
-      echo "  [jpg] interesting JPG/JPEG filenames: $jpg_count" | tee -a "$SUMMARY"
+      echo "  [jpg] interesting JPG/JPEG filenames: $jpg_count" | /usr/bin/tee -a "$SUMMARY"
       if [[ "$jpg_count" -gt 0 ]]; then
-        head -120 "$JPG_TXT" | sed 's/^/    /' | tee -a "$SUMMARY"
+        head -120 "$JPG_TXT" | /usr/bin/sed 's/^/    /' | /usr/bin/tee -a "$SUMMARY"
       fi
     fi
   else
     if [[ "$run_deep_for_part" -eq 0 ]]; then
-      printf "  [fs] skipped (no raw indicators; speed-first mode)\n" | tee -a "$SUMMARY"
+      printf "  [fs] skipped (no raw indicators; speed-first mode)\n" | /usr/bin/tee -a "$SUMMARY"
     else
-      printf "  [fs] not mounted or disabled\n" | tee -a "$SUMMARY"
+      printf "  [fs] not mounted or disabled\n" | /usr/bin/tee -a "$SUMMARY"
     fi
   fi
 
@@ -734,7 +734,7 @@ scan_partition() {
       && command -v foremost >/dev/null 2>&1; then
     ensure_min_free_or_exit "$OUTDIR" "pre-foremost-carving"
     phase_progress "carve" 4 "$phase_total"
-    printf "  [foremost] strong raw indicators found on %s; running targeted file carving to recover embedded artifacts\n" "$part" | tee -a "$SUMMARY"
+    printf "  [foremost] strong raw indicators found on %s; running targeted file carving to recover embedded artifacts\n" "$part" | /usr/bin/tee -a "$SUMMARY"
 
     local FMOUT="$OUTDIR/foremost_${part}"
     rm -rf "$FMOUT"
@@ -742,7 +742,7 @@ scan_partition() {
     foremost -c "$FM_CONF" -T -Q -i "$SRC" -o "$FMOUT" 2>>"$LOG" || true
 
     if [[ -f "$FMOUT/audit.txt" ]]; then
-      grep -v "^$" "$FMOUT/audit.txt" | tail -40 | tee -a "$SUMMARY"
+      /usr/bin/grep -v "^$" "$FMOUT/audit.txt" | /usr/bin/tail -40 | /usr/bin/tee -a "$SUMMARY"
     fi
   fi
 
@@ -753,13 +753,13 @@ scan_partition() {
     echo "$parent,$part,$raw_high,$raw_low,$bip_valid,$bip_candidate,$fs_count,$ext_count,keep" >> "$CSV"
   else
     echo "$parent,$part,0,0,0,0,0,0,no_hits" >> "$CSV"
-    printf "  No crypto hits.\n" | tee -a "$SUMMARY"
+    printf "  No crypto hits.\n" | /usr/bin/tee -a "$SUMMARY"
   fi
 
   local part_end_ts part_elapsed
-  part_end_ts=$(date +%s)
+  part_end_ts=$(/usr/bin/date +%s)
   part_elapsed=$(( part_end_ts - part_start_ts ))
-  printf "  [time] partition %s elapsed: %ss\n\n" "$part" "$part_elapsed" | tee -a "$SUMMARY"
+  printf "  [time] partition %s elapsed: %ss\n\n" "$part" "$part_elapsed" | /usr/bin/tee -a "$SUMMARY"
 }
 
 # ── Main ─────────────────────────────────────────────────────────────────────
@@ -768,13 +768,13 @@ DISKS=("${(@f)$(discover_target_partitions)}")
 DISKS=("${(@f)$(printf '%s\n' "${DISKS[@]}" | LC_ALL=C grep -E '^disk[0-9]+s[0-9]+$' || true)}")
 
 if [[ ${#DISKS[@]} -eq 0 ]]; then
-  echo "No USB drives or SD-card-style external partitions found." | tee -a "$SUMMARY"
-  echo "Check: diskutil list" | tee -a "$SUMMARY"
+  echo "No USB drives or SD-card-style external partitions found." | /usr/bin/tee -a "$SUMMARY"
+  echo "Check: /usr/sbin/diskutil list" | /usr/bin/tee -a "$SUMMARY"
   exit 1
 fi
 
-printf "Partitions selected: %s\n\n" "${DISKS[*]}" | tee -a "$SUMMARY"
-printf "Status: %d partition(s) queued for scan.\n\n" "${#DISKS[@]}" | tee -a "$SUMMARY"
+printf "Partitions selected: %s\n\n" "${DISKS[*]}" | /usr/bin/tee -a "$SUMMARY"
+printf "Status: %d partition(s) queued for scan.\n\n" "${#DISKS[@]}" | /usr/bin/tee -a "$SUMMARY"
 preview_targets "${DISKS[@]}"
 
 typeset -A PARENT_HAS_HITS
@@ -788,30 +788,30 @@ done
 
 # Serial is deliberate. Parallel scans usually saturate shared USB/SD buses and get slower.
 for part in "${DISKS[@]}"; do
-  printf "Status: scanning /dev/%s\n" "$part" | tee -a "$SUMMARY"
+  printf "Status: scanning /dev/%s\n" "$part" | /usr/bin/tee -a "$SUMMARY"
   scan_partition "$part"
 done
 
-printf "=== Eject decision ===\n" | tee -a "$SUMMARY"
+printf "=== Eject decision ===\n" | /usr/bin/tee -a "$SUMMARY"
 
 for parent in ${(k)PARENT_PARTS}; do
   if [[ "${PARENT_HAS_HITS[$parent]}" -eq 1 ]]; then
-    printf "  KEEP  /dev/%s, hits found on:%s\n" "$parent" "${PARENT_PARTS[$parent]}" | tee -a "$SUMMARY"
+    printf "  KEEP  /dev/%s, hits found on:%s\n" "$parent" "${PARENT_PARTS[$parent]}" | /usr/bin/tee -a "$SUMMARY"
     echo "$parent,ALL,-,-,-,-,-,-,kept_hits" >> "$CSV"
   else
-    printf "  CLEAN /dev/%s, no hits on:%s\n" "$parent" "${PARENT_PARTS[$parent]}" | tee -a "$SUMMARY"
+    printf "  CLEAN /dev/%s, no hits on:%s\n" "$parent" "${PARENT_PARTS[$parent]}" | /usr/bin/tee -a "$SUMMARY"
 
     if [[ "$AUTO_EJECT_NO_HITS" -eq 1 ]]; then
-      diskutil eject "/dev/$parent" 2>&1 | tee -a "$SUMMARY" || true
+      /usr/sbin/diskutil eject "/dev/$parent" 2>&1 | /usr/bin/tee -a "$SUMMARY" || true
       echo "$parent,ALL,0,0,0,0,0,0,ejected" >> "$CSV"
     else
-      printf "    auto-eject disabled\n" | tee -a "$SUMMARY"
+      printf "    auto-eject disabled\n" | /usr/bin/tee -a "$SUMMARY"
       echo "$parent,ALL,0,0,0,0,0,0,kept_clean" >> "$CSV"
     fi
   fi
 done
 
-printf "\nScan finished: %s\n" "$(date)" | tee -a "$SUMMARY"
+printf "\nScan finished: %s\n" "$(/usr/bin/date)" | /usr/bin/tee -a "$SUMMARY"
 
 printf "\nOutput:\n"
 printf "  Summary: %s\n" "$SUMMARY"
