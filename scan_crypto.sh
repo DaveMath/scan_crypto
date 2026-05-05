@@ -40,7 +40,7 @@
 set -uo pipefail
 export LC_ALL=C
 export LANG=C
-SCRIPT_VERSION="v6.3.1"
+SCRIPT_VERSION="v6.3.2"
 
 SHOW_ALL_JPG=0
 AUTO_EJECT_OVERRIDE=""
@@ -258,7 +258,7 @@ RE_HIGH="${(j:|:)PAT_HIGH}"
 RE_LOW="${(j:|:)PAT_LOW}"
 RE_ALL="${RE_HIGH}|${RE_LOW}"
 RE_FS_EXTRA='[0-9a-fA-F]{64}'
-RE_EXCLUDE='(uits|amazon|amzn|drm|widevine|playready|fairplay|signature|rsa2048|sha256|manifest|license|x-amz|etag|content-md5|audible|locker|transactiontype|distributor|download[ _-]*(paid|locker|queue)|spotlight|dbstr|dictionary|index|kmditemadditionalrecipientemailaddresses|kmditemhiddenadditionalrecipientemailaddresses|kmditemcontentcreationdateweekdayordinal|kmditemcontentmodificationdateweekofyear|kmditemcontentmodificationdateweekdayordinal|kmditemcontentmodificationdateweekofmonth|mditem|mdworker|mds_stores|store-v2|/9j/4aaqskzjrg|x:xmpmeta|adobe xmp core|adobe photoshop cs3|dc:format=\"image/jpeg\"|xmp\\.iid:|xmp\\.did:|xapmm:documentid|originaldocumentid|uuid:[0-9a-f]{24,}|pubmed|fda\\.gov|acr\\.org|lame3\\.[0-9]+|\\blame\\b|id3v2|xing|vbri|mpeg layer-3|mp3)'
+RE_EXCLUDE='(uits|amazon|amzn|drm|widevine|playready|fairplay|signature|rsa2048|sha256|manifest|license|x-amz|etag|content-md5|audible|locker|transactiontype|distributor|download[ _-]*(paid|locker|queue)|spotlight|dbstr|dictionary|index|kmditemadditionalrecipientemailaddresses|kmditemhiddenadditionalrecipientemailaddresses|kmditemcontentcreationdateweekdayordinal|kmditemcontentmodificationdateweekofyear|kmditemcontentmodificationdateweekdayordinal|kmditemcontentmodificationdateweekofmonth|mditem|mdworker|mds_stores|store-v2|/9j/4aaqskzjrg|x:xmpmeta|adobe xmp core|adobe photoshop cs3|dc:format=\"image/jpeg\"|xmp\\.iid:|xmp\\.did:|xapmm:documentid|originaldocumentid|uuid:[0-9a-f]{24,}|pubmed|fda\\.gov|acr\\.org|lame3\\.[0-9]+|\\blame\\b|id3v2|xing|vbri|mpeg layer-3|mp3|\\bfm0\\b|\\bfm1\\b|fc[01]{6,}:?z+|\\b10382a4\\b|\\b11302a4\\b|\\b12482a4\\b|1138813881388)'
 RE_PATH_EXCLUDE='(/\\.Spotlight-V100/|/Library/Caches/|/Cache/|/logs?/|/log/|download[ _-]*queue|audible)'
 RE_WALLET_FILE='(wallet\\.dat|UTC--|\\.keystore$|\\.wallet$|\\.seed$|xprv|xpub|[yz]prv|[yz]pub)'
 RE_WALLET_LAYOUT='(electrum|exodus|wasabi|bitcoin[ _-]?core|wallets?/|chainstate|blocks|\\.bitcoin|Local Extension Settings|IndexedDB|chrome-extension|moz-extension|metamask)'
