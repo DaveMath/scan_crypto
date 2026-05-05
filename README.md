@@ -1,6 +1,6 @@
 # scan_cyrpto
 
-Current script version: `v5.9.0`
+Current script version: `v6.1.0`
 
 `scan_crypto_v5.sh` is a powerful read-only crypto forensic triage utility for macOS.
 
@@ -51,6 +51,13 @@ sudo zsh scan_crypto_v5.sh --outdir ~/Documents/crypto_scan
 sudo zsh scan_crypto_v5.sh --min-free-gb 30
 sudo zsh scan_crypto_v5.sh --version
 ```
+
+Recovered-image OCR triage (local):
+- If `macos-vision-ocr` is installed, it is used first for carved-image OCR triage.
+- If `macos-vision-ocr` is not available, the script falls back to `tesseract`.
+- Matching images are copied into `image_hits/` inside the run folder.
+- Install `macos-vision-ocr`: [github.com/bytefer/macos-vision-ocr](https://github.com/bytefer/macos-vision-ocr)
+- Optional fallback install: `brew install tesseract`
 
 ## Outputs
 

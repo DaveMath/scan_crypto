@@ -40,7 +40,7 @@
 set -uo pipefail
 export LC_ALL=C
 export LANG=C
-SCRIPT_VERSION="v6.1.0"
+SCRIPT_VERSION="v6.1.1"
 
 SHOW_ALL_JPG=0
 AUTO_EJECT_OVERRIDE=""
@@ -617,15 +617,25 @@ triage_recovered_images() {
   local part="$2"
   local hit_count=0
   local ocr_tool=""
+  local ocr_mode=""
 
-  if command -v tesseract >/dev/null 2>&1; then
+  if command -v macos-vision-ocr >/dev/null 2>&1; then
+    ocr_tool="macos-vision-ocr"
+    ocr_mode="vision"
+  elif command -v vision-ocr >/dev/null 2>&1; then
+    ocr_tool="vision-ocr"
+    ocr_mode="vision"
+  elif command -v tesseract >/dev/null 2>&1; then
     ocr_tool="tesseract"
+    ocr_mode="tesseract"
   fi
 
   if [[ -z "$ocr_tool" ]]; then
-    echo "  [img] OCR skipped (install tesseract to enable screenshot key/balance triage)" | /usr/bin/tee -a "$SUMMARY"
+    echo "  [img] OCR skipped (install macos-vision-ocr or tesseract to enable screenshot key/balance triage)" | /usr/bin/tee -a "$SUMMARY"
     return
   fi
+
+  echo "  [img] OCR engine: $ocr_tool" | /usr/bin/tee -a "$SUMMARY"
 
   local -a images
   images=("${(@f)$(/usr/bin/find "$carve_dir" -type f \\( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' \\) 2>/dev/null)}")
@@ -634,7 +644,11 @@ triage_recovered_images() {
   local re='(recovery phrase|secret recovery|seed phrase|mnemonic|wallet|bitcoin|btc|balance|xpub|xprv|bc1[[:alnum:]]{8,}|\\$[0-9]{1,3}(,[0-9]{3})*(\\.[0-9]{2})?)'
   local img txt
   for img in "${images[@]}"; do
-    txt="$($ocr_tool "$img" stdout 2>/dev/null | /usr/bin/tr '[:upper:]' '[:lower:]' || true)"
+    if [[ "$ocr_mode" == "vision" ]]; then
+      txt="$($ocr_tool "$img" 2>/dev/null | /usr/bin/tr '[:upper:]' '[:lower:]' || true)"
+    else
+      txt="$($ocr_tool "$img" stdout 2>/dev/null | /usr/bin/tr '[:upper:]' '[:lower:]' || true)"
+    fi
     if [[ -n "$txt" ]] && echo "$txt" | /usr/bin/grep -Eiq "$re"; then
       hit_count=$((hit_count + 1))
       /bin/cp -f "$img" "$IMAGE_HITS_DIR/${part}_$(/usr/bin/basename "$img")" 2>/dev/null || true
