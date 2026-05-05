@@ -61,6 +61,18 @@ By default, output is written to:
 
 Plus per-partition hit artifacts for deeper review.
 
+## Read/Write Safety (macOS)
+
+- Target media (USB/SD) is read-only for this workflow.
+- The scanner reads from device nodes such as `/dev/disk*` or `/dev/rdisk*` and mounted target volumes.
+- The scanner does not write files to target media mount points such as `/Volumes/<target>`.
+- `parse_spotlight_tmp.sh` reads scan artifacts and runs parser logic on those artifacts only.
+- All generated files are written only to your configured `--outdir` (default: `~/Documents/crypto_scan`) on system storage.
+
+Notes about macOS paths:
+- `/dev/*` entries are device nodes, not normal output file locations.
+- Writing to `~/Documents/...` writes to the internal system APFS data volume.
+
 ## License
 
 MIT
