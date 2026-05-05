@@ -40,7 +40,7 @@
 set -uo pipefail
 export LC_ALL=C
 export LANG=C
-SCRIPT_VERSION="v5.7.1"
+SCRIPT_VERSION="v5.8.0"
 
 SHOW_ALL_JPG=0
 AUTO_EJECT_OVERRIDE=""
@@ -108,7 +108,7 @@ LOG="$OUTDIR/run.log"
 
 bytes_free_for_path() {
   local path="$1"
-  df -k "$path" 2>/dev/null | /usr/bin/awk 'NR==2 {print $4 * 1024}'
+  /bin/df -k "$path" 2>/dev/null | /usr/bin/awk 'NR==2 {print $4 * 1024}'
 }
 
 ensure_min_free_or_exit() {
@@ -137,7 +137,7 @@ ensure_min_free_or_exit() {
 
 echo "parent,partition,raw_high,raw_low,bip39_valid,bip39_candidate,fs_hits,ext_hits,action" > "$CSV"
 
-printf "Scan started: %s\n" "$(/usr/bin/date)" | /usr/bin/tee -a "$SUMMARY"
+printf "Scan started\n" | /usr/bin/tee -a "$SUMMARY"
 printf "Script version: %s\n" "$SCRIPT_VERSION" | /usr/bin/tee -a "$SUMMARY"
 printf "Output directory: %s\n\n" "$OUTDIR" | /usr/bin/tee -a "$SUMMARY"
 printf "Storage safety reserve: %s GiB free minimum\n\n" "$MIN_FREE_GB" | /usr/bin/tee -a "$SUMMARY"
@@ -479,23 +479,15 @@ fs_scan() {
   fi
 
   local current=0
-  local fs_start_ts
-  fs_start_ts=$(/usr/bin/date +%s)
   for f in "${files[@]}"; do
     (( current++ ))
     local filled=$(( BAR_WIDTH * current / total ))
     local empty=$(( BAR_WIDTH - filled ))
     local bar="${(r:$filled::#:):-}${(r:$empty::-:):-}"
-    local now elapsed rate remaining eta
-    now=$(/usr/bin/date +%s)
-    elapsed=$(( now - fs_start_ts ))
-    (( elapsed < 1 )) && elapsed=1
-    rate=$(( current / elapsed ))
-    (( rate < 1 )) && rate=1
-    remaining=$(( (total - current) / rate ))
-    eta=$(( now + remaining ))
-    printf "\r  [fs] %s [%s] %d/%d files | eta ~ %s " \
-      "$label" "$bar" "$current" "$total" "$(/usr/bin/date -r "$eta" +%H:%M:%S)" > /dev/tty
+    local pct
+    pct=$(( current * 100 / total ))
+    printf "\r  [fs] %s [%s] %d/%d files (%d%%) " \
+      "$label" "$bar" "$current" "$total" "$pct" > /dev/tty
 
     local reason=""
     if LC_ALL=C grep -qiE "$RE_ALL" "$f" 2>/dev/null; then
@@ -592,8 +584,6 @@ scan_partition() {
   local raw_high=0 raw_low=0 bip_valid=0 bip_candidate=0 fs_count=0 ext_count=0
 
   local phase_total=4
-  local part_start_ts
-  part_start_ts=$(/usr/bin/date +%s)
   printf "=== %s ===\n" "$part" | /usr/bin/tee -a "$SUMMARY"
   phase_progress "scan" 0 "$phase_total"
 
@@ -756,10 +746,7 @@ scan_partition() {
     printf "  No crypto hits.\n" | /usr/bin/tee -a "$SUMMARY"
   fi
 
-  local part_end_ts part_elapsed
-  part_end_ts=$(/usr/bin/date +%s)
-  part_elapsed=$(( part_end_ts - part_start_ts ))
-  printf "  [time] partition %s elapsed: %ss\n\n" "$part" "$part_elapsed" | /usr/bin/tee -a "$SUMMARY"
+  printf "  [scan] partition %s complete\n\n" "$part" | /usr/bin/tee -a "$SUMMARY"
 }
 
 # ── Main ─────────────────────────────────────────────────────────────────────
@@ -811,7 +798,7 @@ for parent in ${(k)PARENT_PARTS}; do
   fi
 done
 
-printf "\nScan finished: %s\n" "$(/usr/bin/date)" | /usr/bin/tee -a "$SUMMARY"
+printf "\nScan finished\n" | /usr/bin/tee -a "$SUMMARY"
 
 printf "\nOutput:\n"
 printf "  Summary: %s\n" "$SUMMARY"
