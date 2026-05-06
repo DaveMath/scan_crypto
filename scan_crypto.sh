@@ -40,7 +40,7 @@
 set -uo pipefail
 export LC_ALL=C
 export LANG=C
-SCRIPT_VERSION="v6.3.5"
+SCRIPT_VERSION="v6.3.6"
 
 SHOW_ALL_JPG=0
 AUTO_EJECT_OVERRIDE=""
@@ -262,6 +262,7 @@ RE_EXCLUDE='(uits|amazon|amzn|drm|widevine|playready|fairplay|signature|rsa2048|
 RE_PATH_EXCLUDE='(/\\.Spotlight-V100/|/Library/Caches/|/Cache/|/logs?/|/log/|download[ _-]*queue|audible)'
 RE_WALLET_FILE='(wallet\\.dat|UTC--|\\.keystore$|\\.wallet$|\\.seed$|xprv|xpub|[yz]prv|[yz]pub)'
 RE_WALLET_LAYOUT='(electrum|exodus|wasabi|bitcoin[ _-]?core|wallets?/|chainstate|blocks|\\.bitcoin|Local Extension Settings|IndexedDB|chrome-extension|moz-extension|metamask)'
+RE_NOISE_SHAPE='(u{20,}|k{20,}|[A-Za-z0-9+/]{80,}=*|<< ?/.*xref|/imageservice/ahr0|lame3\\.)'
 
 apply_profile() {
   case "$PROFILE" in
@@ -670,13 +671,10 @@ triage_recovered_images() {
 
   echo "  [img] OCR engine: $ocr_tool" | /usr/bin/tee -a "$SUMMARY"
 
-  local -a images
-  images=("${(@f)$(/usr/bin/find "$carve_dir" -type f \\( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' \\) 2>/dev/null)}")
-  [[ ${#images[@]} -eq 0 ]] && return
-
   local re='(recovery phrase|secret recovery|seed phrase|mnemonic|wallet|bitcoin|btc|balance|xpub|xprv|bc1[[:alnum:]]{8,}|\\$[0-9]{1,3}(,[0-9]{3})*(\\.[0-9]{2})?)'
-  local img txt
-  for img in "${images[@]}"; do
+  local img txt any=0
+  while IFS= read -r -d '' img; do
+    any=1
     if [[ "$ocr_mode" == "vision" ]]; then
       txt="$($ocr_tool "$img" 2>/dev/null | /usr/bin/tr '[:upper:]' '[:lower:]' || true)"
     else
@@ -686,7 +684,8 @@ triage_recovered_images() {
       hit_count=$((hit_count + 1))
       /bin/cp -f "$img" "$IMAGE_HITS_DIR/${part}_$(/usr/bin/basename "$img")" 2>/dev/null || true
     fi
-  done
+  done < <(/usr/bin/find "$carve_dir" -type f \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' \) -print0 2>/dev/null)
+  [[ "$any" -eq 0 ]] && return
 
   echo "  [img] OCR triage complete: ${hit_count} image hit(s) copied to $IMAGE_HITS_DIR" | /usr/bin/tee -a "$SUMMARY"
 }
@@ -869,11 +868,14 @@ scan_partition() {
     LC_ALL=C grep -a -iE "$RE_HIGH" "$ALL_HITS" \
       | LC_ALL=C cut -d' ' -f2- \
       | LC_ALL=C grep -a -ivE "$RE_EXCLUDE" \
+      | LC_ALL=C grep -a -ivE "$RE_NOISE_SHAPE" \
       | LC_ALL=C sort -u > "$HIGH_TXT" || true
 
     LC_ALL=C grep -a -iE "$RE_LOW" "$ALL_HITS" \
       | LC_ALL=C cut -d' ' -f2- \
       | LC_ALL=C grep -a -ivE "$RE_EXCLUDE" \
+      | LC_ALL=C grep -a -ivE "$RE_NOISE_SHAPE" \
+      | LC_ALL=C grep -a -iE "$RE_WALLET_FILE|$RE_WALLET_LAYOUT|bip39|seed phrase|xprv|xpub|mnemonic" \
       | LC_ALL=C sort -u > "$LOW_TXT" || true
 
     LC_ALL=C cut -d' ' -f2- "$RAW_TMP" \
